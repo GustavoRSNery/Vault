@@ -4,6 +4,8 @@ import { useAuth } from '@/features/auth/AuthContext'
 const ITENS = [
   { para: '/', rotulo: 'Dashboard', fim: true },
   { para: '/cofres', rotulo: 'Cofres', fim: false },
+  { para: '/auditoria', rotulo: 'Auditoria', fim: false },
+  { para: '/perfil', rotulo: 'Perfil', fim: false },
 ]
 
 export function Layout() {

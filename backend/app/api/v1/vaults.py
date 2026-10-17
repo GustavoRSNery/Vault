@@ -69,6 +69,19 @@ class CreateSecretRequest(BaseModel):
     description: str = ""
 
 
+class NovaVersaoRequest(BaseModel):
+    value: str = Field(min_length=1)
+
+
+class VersaoResponse(BaseModel):
+    """Metadados de uma versao. Nunca o valor."""
+
+    version: int
+    created_by: str
+    created_at: datetime
+    is_current: bool
+
+
 class RevealResponse(BaseModel):
     secret_id: str
     secret_name: str
@@ -251,6 +264,235 @@ def revelar_segredo(
         version=revelado.version,
         value=revelado.value,
     )
+
+
+@router.post(
+    "/{vault_name}/segredos/{secret_name}/versoes",
+    response_model=SecretSummary, status_code=status.HTTP_201_CREATED,
+    summary="Gravar nova versao",
+)
+def nova_versao(
+    vault_name: str,
+    secret_name: str,
+    payload: NovaVersaoRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    crypto: Annotated[EnvelopeCryptoService, Depends(get_crypto)],
+    db: Annotated[Session, Depends(get_db)],
+) -> SecretSummary:
+    """Grava uma versao nova. As anteriores permanecem intactas."""
+    cofre = vaults.get_by_name(Slug(vault_name))
+    nome = Slug(secret_name)
+    caminho = cofre.secret_path(nome)
+
+    if not evaluate(policies.policies_for_user(current.id), caminho, Capability.UPDATE):
+        audit.append(_evento(current, AuditAction.ACCESS_DENIED, str(caminho),
+                             AuditOutcome.FAILURE, "Sem permissao para alterar o segredo."))
+        _commit_then_raise(db, PermissionDeniedError("Voce nao pode alterar este segredo."))
+
+    cofre.ensure_usable()
+    segredo = secrets.get_in_vault(cofre.id, nome)
+    versao = segredo.add_version(crypto.encrypt(payload.value), created_by=current.id)
+    secrets.add_version(segredo.id, versao)
+
+    audit.append(_evento(current, AuditAction.SECRET_UPDATED, str(caminho)))
+    return SecretSummary(
+        id=segredo.id, name=str(segredo.name), kind=str(segredo.kind),
+        description=segredo.description, current_version=versao.version,
+        updated_at=versao.created_at,
+    )
+
+
+@router.get(
+    "/{vault_name}/segredos/{secret_name}/versoes",
+    response_model=list[VersaoResponse], summary="Historico de versoes",
+)
+def listar_versoes(
+    vault_name: str,
+    secret_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[VersaoResponse]:
+    """O historico mostra QUANDO e por QUEM, nunca os valores antigos."""
+    cofre = vaults.get_by_name(Slug(vault_name))
+    nome = Slug(secret_name)
+    caminho = cofre.secret_path(nome)
+
+    if not evaluate(policies.policies_for_user(current.id), caminho, Capability.READ):
+        audit.append(_evento(current, AuditAction.ACCESS_DENIED, str(caminho),
+                             AuditOutcome.FAILURE, "Sem permissao para ver o historico."))
+        _commit_then_raise(db, PermissionDeniedError("Voce nao tem acesso a este segredo."))
+
+    segredo = secrets.get_in_vault(cofre.id, nome)
+    atual = segredo.current_version.version
+    return [
+        VersaoResponse(
+            version=v.version, created_by=v.created_by,
+            created_at=v.created_at, is_current=v.version == atual,
+        )
+        for v in sorted(segredo.versions, key=lambda v: v.version, reverse=True)
+    ]
+
+
+@router.delete(
+    "/{vault_name}/segredos/{secret_name}",
+    response_model=SecretSummary, summary="Mover para a lixeira",
+)
+def excluir_segredo(
+    vault_name: str,
+    secret_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> SecretSummary:
+    """Lixeira, nao exclusao: as versoes continuam recuperaveis."""
+    cofre = vaults.get_by_name(Slug(vault_name))
+    nome = Slug(secret_name)
+    caminho = cofre.secret_path(nome)
+
+    if not evaluate(policies.policies_for_user(current.id), caminho, Capability.DELETE):
+        audit.append(_evento(current, AuditAction.ACCESS_DENIED, str(caminho),
+                             AuditOutcome.FAILURE, "Sem permissao para excluir o segredo."))
+        _commit_then_raise(db, PermissionDeniedError("Voce nao pode excluir este segredo."))
+
+    cofre.ensure_usable()
+    segredo = secrets.get_in_vault(cofre.id, nome)
+    segredo.soft_delete()
+    secrets.save_trash_state(segredo)
+
+    audit.append(_evento(current, AuditAction.SECRET_DELETED, str(caminho)))
+    versao = segredo.current_version
+    return SecretSummary(
+        id=segredo.id, name=str(segredo.name), kind=str(segredo.kind),
+        description=segredo.description, current_version=versao.version,
+        updated_at=versao.created_at,
+    )
+
+
+@router.post(
+    "/{vault_name}/segredos/{secret_name}/restaurar",
+    response_model=SecretSummary, summary="Restaurar da lixeira",
+)
+def restaurar_segredo(
+    vault_name: str,
+    secret_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> SecretSummary:
+    cofre = vaults.get_by_name(Slug(vault_name))
+    nome = Slug(secret_name)
+    caminho = cofre.secret_path(nome)
+
+    if not evaluate(policies.policies_for_user(current.id), caminho, Capability.UPDATE):
+        audit.append(_evento(current, AuditAction.ACCESS_DENIED, str(caminho),
+                             AuditOutcome.FAILURE, "Sem permissao para restaurar o segredo."))
+        _commit_then_raise(db, PermissionDeniedError("Voce nao pode restaurar este segredo."))
+
+    cofre.ensure_usable()
+    segredo = secrets.get_in_vault(cofre.id, nome)
+    segredo.restore()
+    secrets.save_trash_state(segredo)
+
+    audit.append(_evento(current, AuditAction.SECRET_RESTORED, str(caminho)))
+    versao = segredo.current_version
+    return SecretSummary(
+        id=segredo.id, name=str(segredo.name), kind=str(segredo.kind),
+        description=segredo.description, current_version=versao.version,
+        updated_at=versao.created_at,
+    )
+
+
+@router.get(
+    "/{vault_name}/lixeira", response_model=list[SecretSummary],
+    summary="Segredos na lixeira",
+)
+def listar_lixeira(
+    vault_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[SecretSummary]:
+    cofre = vaults.get_by_name(Slug(vault_name))
+    if not evaluate(policies.policies_for_user(current.id), cofre.path, Capability.LIST):
+        audit.append(_evento(current, AuditAction.ACCESS_DENIED, str(cofre.path),
+                             AuditOutcome.FAILURE, "Sem permissao para listar o cofre."))
+        _commit_then_raise(db, PermissionDeniedError("Voce nao tem acesso a este cofre."))
+
+    na_lixeira = [
+        s for s in secrets.list_in_vault(cofre.id, include_deleted=True) if s.is_deleted
+    ]
+    return [
+        SecretSummary(
+            id=s.id, name=str(s.name), kind=str(s.kind), description=s.description,
+            current_version=s.current_version.version,
+            updated_at=s.current_version.created_at,
+        )
+        for s in na_lixeira
+    ]
+
+
+@router.post(
+    "/{vault_name}/selar", response_model=VaultResponse, summary="Selar cofre",
+)
+def selar(
+    vault_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> VaultResponse:
+    """Sela o cofre: nenhum segredo entra ou sai ate ser desselado."""
+    cofre = vaults.get_by_name(Slug(vault_name))
+    if not evaluate(policies.policies_for_user(current.id), cofre.path, Capability.ADMIN):
+        audit.append(_evento(current, AuditAction.ACCESS_DENIED, str(cofre.path),
+                             AuditOutcome.FAILURE, "Sem permissao para selar o cofre."))
+        _commit_then_raise(db, PermissionDeniedError("Voce nao pode selar este cofre."))
+
+    cofre.seal()
+    vaults.save_state(cofre)
+    audit.append(_evento(current, AuditAction.VAULT_SEALED, str(cofre.path)))
+    return _vault_response(cofre)
+
+
+@router.post(
+    "/{vault_name}/desselar", response_model=VaultResponse, summary="Desselar cofre",
+)
+def desselar(
+    vault_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> VaultResponse:
+    cofre = vaults.get_by_name(Slug(vault_name))
+    if not evaluate(policies.policies_for_user(current.id), cofre.path, Capability.ADMIN):
+        audit.append(_evento(current, AuditAction.ACCESS_DENIED, str(cofre.path),
+                             AuditOutcome.FAILURE, "Sem permissao para desselar o cofre."))
+        _commit_then_raise(db, PermissionDeniedError("Voce nao pode desselar este cofre."))
+
+    cofre.unseal()
+    vaults.save_state(cofre)
+    audit.append(_evento(current, AuditAction.VAULT_UNSEALED, str(cofre.path)))
+    return _vault_response(cofre)
 
 
 def _vault_response(vault: Vault) -> VaultResponse:

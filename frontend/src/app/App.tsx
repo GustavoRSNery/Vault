@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { PerfilPage } from '@/features/auth/PerfilPage'
+import { AuditoriaPage } from '@/features/audit/AuditoriaPage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CofreDetalhePage } from '@/features/vaults/CofreDetalhePage'
 import { CofresPage } from '@/features/vaults/CofresPage'
@@ -36,6 +38,8 @@ function Rotas() {
         <Route index element={<DashboardPage />} />
         <Route path="cofres" element={<CofresPage />} />
         <Route path="cofres/:nome" element={<CofreDetalhePage />} />
+        <Route path="auditoria" element={<AuditoriaPage />} />
+        <Route path="perfil" element={<PerfilPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
