@@ -175,3 +175,55 @@ class TestAnchoredVerification:
 
     def test_verificacao_sem_ancora_continua_funcionando(self) -> None:
         assert verify_chain(_cadeia()) == []
+
+
+class TestTimestampCanonicalization:
+    """Regressão: o fingerprint não pode depender do dialeto do banco.
+
+    O SQLite devolve datetime SEM timezone; o Postgres, COM. Se o hash usar
+    `isoformat()` direto, o mesmo evento produz hashes diferentes nos dois
+    bancos e a trilha falha na verificação após um round-trip. A suíte roda
+    em SQLite e produção roda em Postgres — exatamente o par que esconde isso.
+    """
+
+    def test_ingenuo_e_consciente_no_mesmo_instante_tem_o_mesmo_hash(self) -> None:
+        from datetime import UTC, datetime
+
+        consciente = datetime(2026, 10, 17, 14, 32, 10, 123456, tzinfo=UTC)
+        ingenuo = datetime(2026, 10, 17, 14, 32, 10, 123456)  # como o SQLite devolve
+
+        com_tz = AuditEvent(
+            action=AuditAction.SECRET_REVEALED, actor_id="u1", actor_label="g",
+            target_path="cofres/x", occurred_at=consciente, id="fixo",
+        )
+        sem_tz = AuditEvent(
+            action=AuditAction.SECRET_REVEALED, actor_id="u1", actor_label="g",
+            target_path="cofres/x", occurred_at=ingenuo, id="fixo",
+        )
+        assert com_tz.fingerprint() == sem_tz.fingerprint()
+
+    def test_fuso_diferente_no_mesmo_instante_tem_o_mesmo_hash(self) -> None:
+        """Um driver que devolva -03:00 não pode mudar o hash."""
+        from datetime import UTC, datetime, timedelta, timezone
+
+        utc = datetime(2026, 10, 17, 17, 0, 0, tzinfo=UTC)
+        brasilia = utc.astimezone(timezone(timedelta(hours=-3)))
+
+        a = AuditEvent(action=AuditAction.LOGIN_SUCCESS, actor_id="u1", actor_label="g",
+                       target_path="auth", occurred_at=utc, id="fixo")
+        b = AuditEvent(action=AuditAction.LOGIN_SUCCESS, actor_id="u1", actor_label="g",
+                       target_path="auth", occurred_at=brasilia, id="fixo")
+        assert a.fingerprint() == b.fingerprint()
+
+    def test_instantes_diferentes_continuam_com_hashes_diferentes(self) -> None:
+        """A normalização não pode achatar tempos distintos no mesmo hash."""
+        from datetime import UTC, datetime
+
+        base = datetime(2026, 10, 17, 14, 32, 10, 123456, tzinfo=UTC)
+        depois = datetime(2026, 10, 17, 14, 32, 10, 123457, tzinfo=UTC)
+
+        a = AuditEvent(action=AuditAction.LOGIN_SUCCESS, actor_id="u1", actor_label="g",
+                       target_path="auth", occurred_at=base, id="fixo")
+        b = AuditEvent(action=AuditAction.LOGIN_SUCCESS, actor_id="u1", actor_label="g",
+                       target_path="auth", occurred_at=depois, id="fixo")
+        assert a.fingerprint() != b.fingerprint()

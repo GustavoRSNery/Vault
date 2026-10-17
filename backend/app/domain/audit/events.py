@@ -23,7 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -112,10 +112,26 @@ class AuditEvent:
             "ip_address": self.ip_address,
             "user_agent": self.user_agent,
             "metadata": self.metadata,
-            "occurred_at": self.occurred_at.isoformat(),
+            "occurred_at": self._canonical_timestamp(self.occurred_at),
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _canonical_timestamp(moment: datetime) -> str:
+        """Carimbo de tempo em forma única, imune ao dialeto do banco.
+
+        Isto não é preciosismo: o SQLite devolve datetime SEM timezone, o
+        Postgres devolve COM. Formatar com isoformat() direto produziria
+        hashes diferentes para o mesmo evento em bancos diferentes, e a
+        trilha inteira falharia na verificação depois de um round-trip.
+
+        A normalização é sempre para UTC, em microssegundos. Um datetime
+        ingênuo vindo do banco é assumido como UTC — é o que a aplicação
+        grava, já que `utcnow()` é a única fonte de tempo do domínio.
+        """
+        aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+        return aware.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
 
 
 @dataclass(frozen=True, slots=True)
