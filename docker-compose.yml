@@ -1,0 +1,66 @@
+# Vault de Senhas — ambiente local completo.
+#
+#   docker compose up -d --build     sobe tudo
+#   docker compose logs -f api       acompanha o backend
+#   docker compose down              encerra (os dados ficam no volume)
+#
+# O banco é Postgres, o mesmo dialeto de produção. Rodar em Postgres aqui
+# evita a classe de bug que já apareceu neste projeto: tipos que o SQLite
+# aceita de um jeito e o Postgres de outro.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vault_db
+    environment:
+      POSTGRES_USER: vault
+      POSTGRES_PASSWORD: vault_local_dev
+      POSTGRES_DB: vault
+    volumes:
+      - vault_pgdata:/var/lib/postgresql/data
+    # Porta alta para não colidir com o Postgres que já roda nesta máquina.
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vault -d vault"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    container_name: vault_api
+    environment:
+      VAULT_ENVIRONMENT: development
+      VAULT_DATABASE_URL: postgresql+psycopg://vault:vault_local_dev@db:5432/vault
+      # Chaves locais de desenvolvimento. Em produção vêm do KMS e de um
+      # gerenciador de segredos — nunca de um arquivo versionado como este.
+      VAULT_MASTER_KEY_B64: ${VAULT_MASTER_KEY_B64:-bG9jYWxkZXZrZXkwMTIzNDU2Nzg5YWJjZGVmZ2hpams=}
+      VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:-segredo-local-de-desenvolvimento-com-mais-de-32-bytes}
+      VAULT_CORS_ORIGINS: '["http://localhost:8080"]'
+    depends_on:
+      db:
+        condition: service_healthy
+    # O banco sobe vazio na primeira vez: cria as tabelas, o administrador e
+    # os dados de demonstração. Os três passos são idempotentes.
+    command: >
+      sh -c "python -m app.tools.criar_admin ana.souza@exemplo.com.br SenhaForteDeDev2026 &&
+             python -m app.tools.popular_demo &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8777:8000"
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    container_name: vault_web
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  vault_pgdata:

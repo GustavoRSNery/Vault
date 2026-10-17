@@ -31,6 +31,32 @@ permissão ampla no cofre.
 
 ## Como rodar
 
+### Com Docker (recomendado)
+
+```bash
+docker compose up -d --build
+```
+
+Pronto: `http://localhost:8080`. O banco é criado, o administrador e os dados
+de demonstração entram sozinhos, e os três passos são idempotentes — subir de
+novo não duplica nada.
+
+| Serviço | Endereço | O que é |
+| --- | --- | --- |
+| web | http://localhost:8080 | a aplicação (nginx servindo o build + proxy da API) |
+| api | http://localhost:8777/docs | a API e sua documentação interativa |
+| db | localhost:55432 | Postgres (porta alta para não colidir com outro na máquina) |
+
+Acessos de demonstração:
+
+- `ana.souza@exemplo.com.br` / `SenhaForteDeDev2026` — administrador
+- `contador@exemplo.com.br` / `SenhaDoContador2026` — carteira limitada
+
+O navegador fala só com a porta 8080: o nginx encaminha `/api/` para a API no
+mesmo host, então não há CORS nem endereço de backend embutido no bundle.
+
+### Sem Docker
+
 Requisitos: Python 3.12+, Node 20+.
 
 ### Backend
