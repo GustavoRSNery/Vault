@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { request, setTokens, setUnauthenticatedHandler } from '@/shared/api/client'
 
 export type Usuario = {
@@ -41,16 +42,33 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
   const [carregando, setCarregando] = useState(false)
+  const queryClient = useQueryClient()
+
+  /**
+   * Zera o cache de dados ao trocar de sessão.
+   *
+   * Sem isto, o React Query serve ao próximo usuário o que respondeu ao
+   * anterior: entrar com uma conta de permissão menor exibiria os cofres da
+   * conta anterior até o cache expirar. Num cofre de senhas isso é vazamento
+   * entre carteiras, não um detalhe de atualização de tela.
+   */
+  const limparDados = useCallback(() => {
+    queryClient.clear()
+  }, [queryClient])
 
   const sair = useCallback(() => {
     setTokens(null)
     setUsuario(null)
-  }, [])
+    limparDados()
+  }, [limparDados])
 
   useEffect(() => {
     // Quando o cliente HTTP esgota o refresh, a aplicação volta ao login.
-    setUnauthenticatedHandler(() => setUsuario(null))
-  }, [])
+    setUnauthenticatedHandler(() => {
+      setUsuario(null)
+      limparDados()
+    })
+  }, [limparDados])
 
   const entrar = useCallback(
     async (email: string, senha: string, codigo?: string): Promise<ResultadoLogin> => {
@@ -65,6 +83,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return { tipo: 'mfa_necessario' }
         }
 
+        // Limpa antes de buscar: garante que nada do usuário anterior
+        // sobreviva a uma troca de conta sem logout explícito.
+        limparDados()
         setTokens(resposta.tokens)
         setUsuario(await request<Usuario>('/auth/me'))
         return { tipo: 'autenticado' }
@@ -72,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCarregando(false)
       }
     },
-    [],
+    [limparDados],
   )
 
   const valor = useMemo(
