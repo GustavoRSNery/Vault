@@ -11,15 +11,23 @@ do design system do projeto.
 
 | Entregue | Em aberto |
 | --- | --- |
-| Autenticação com senha (Argon2id) e MFA por TOTP | Telas de cadastro e recuperação |
-| Cofres, segredos versionados, lixeira | Rotação automática, custódia/check-out |
+| Login com senha (Argon2id) e MFA por TOTP, com cadastro em duas etapas | Recuperação de senha, convite de usuário |
+| Cofres, segredos versionados, histórico, lixeira com restauração | Rotação automática, custódia/check-out |
 | RBAC por caminho, com negação tendo precedência | Editor de políticas na interface |
-| Trilha de auditoria encadeada + âncora externa | Exportação para SIEM |
-| Selo do cofre (seal/unseal) no domínio | Selagem via KMS e quórum Shamir |
-| API REST e telas de login, dashboard e cofres | As demais 52 telas do inventário |
+| Trilha de auditoria encadeada, com verificação de integridade | Exportação para SIEM que alimente as âncoras |
+| Selar e desselar cofre | Selagem via KMS e quórum Shamir |
+| 18 endpoints e 6 telas: login, dashboard, cofres, detalhe, auditoria, perfil | As demais 51 telas do inventário |
 
-**158 testes** (81 unitários, 52 de integração, 25 end-to-end), validados
-também com o sistema no ar.
+**185 testes** (81 unitários, 52 de integração, 52 end-to-end), validados
+também com o sistema no ar e conferidos no navegador.
+
+### Ambiente de demonstração
+
+`python -m app.tools.popular_demo` cria 3 cofres, 7 segredos e dois usuários
+com carteiras diferentes. O segundo (`contador@exemplo.com.br`) existe para
+tornar o RBAC visível na interface: ele enxerga apenas o cofre Contábil e tem
+a revelação de um segredo específico negada por política, mesmo tendo
+permissão ampla no cofre.
 
 ## Como rodar
 
@@ -94,6 +102,12 @@ resposta denunciaria o que a mensagem esconde.
 **Tokens em memória no front.** `localStorage` é legível por qualquer script na
 página, e um único XSS entregaria a sessão. O custo é recarregar a aba exigir
 novo login; num cofre de senhas o troco compensa.
+
+**O cache é zerado a cada troca de sessão.** Encontrado validando no navegador:
+sem isso, o React Query servia ao próximo usuário os cofres do anterior. A API
+sempre respondeu certo, mas exibir o nome de um cofre alheio já revela que ele
+existe a quem não deveria saber. O `AuthContext` limpa ao sair e ao entrar —
+as duas pontas, porque a troca de conta nem sempre passa por um logout.
 
 **Segredo nasce mascarado.** Revelar é ação explícita, o valor some sozinho em
 30 s, e copiar não exibe nada na tela. O `__repr__` dos objetos que carregam
