@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..application.access.login import Login
 from ..config import Settings, get_settings
 from ..domain.shared.errors import AuthenticationError
+from ..application.ports.siem import SiemExporter
+from ..infrastructure.audit.exporters import JsonlExporter
 from ..infrastructure.auth.tokens import TokenService
 from ..infrastructure.auth.totp import TotpService
 from ..infrastructure.crypto.envelope import EnvelopeCryptoService, LocalKeyProvider
@@ -165,3 +167,14 @@ def get_policies(db: Annotated[Session, Depends(get_db)]) -> PolicyRepository:
 
 def get_audit(db: Annotated[Session, Depends(get_db)]) -> AuditRepository:
     return AuditRepository(db)
+
+
+def get_siem_exporter(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SiemExporter:
+    """Destino da exportacao da trilha.
+
+    Trocar o SIEM de producao e trocar esta linha: o caso de uso so conhece a
+    porta `SiemExporter`, nao o arquivo.
+    """
+    return JsonlExporter(settings.audit_export_path)

@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**43 das 57 telas** do inventário de arquitetura, **48 endpoints**, **318
+**43 das 57 telas** do inventário de arquitetura, **49 endpoints**, **340
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 
@@ -25,7 +25,7 @@ e conferidos no navegador.
 | **Certificados com faixas de expiração** | Upload do arquivo do certificado |
 | **Solicitações de acesso temporário**, com concessão que caduca sozinha | — |
 | **Busca global** e **central de alertas**, ambas filtradas por permissão | Regras de notificação (dependem de canal de envio) |
-| Trilha de auditoria encadeada, com verificação de integridade | Exportação para SIEM que alimente as âncoras |
+| Trilha de auditoria encadeada, **exportada e ancorada** | Destino inviolável de verdade (hoje é arquivo local) |
 | Selar e desselar cofre | Selagem via KMS e quórum Shamir |
 
 Fora do escopo entregue, por fase: acesso de máquina para RPAs (AppRole,
@@ -225,10 +225,29 @@ Ela **não** detecta, sozinha, duas coisas:
 2. **Truncamento do fim.** Apagar os últimos eventos deixa a cadeia válida.
 
 A defesa dos dois é a mesma: a **âncora externa** (`ChainAnchor`) — um par
-sequência+hash registrado num destino que a aplicação não pode reescrever
-(SIEM, bucket somente-anexação). `verify_chain(eventos, anchors=...)` pega a
-recostura. A exportação periódica que alimenta essas âncoras é trabalho da
-fase 3 e **ainda não está implementada**: até lá, a garantia é parcial.
+sequência+hash registrado num destino que a aplicação não pode reescrever.
+`POST /auditoria/exportar` envia os eventos pendentes e grava a âncora na
+última sequência do lote, nesta ordem: **primeiro envia, só então ancora.**
+Inverter criaria âncora para evento que nunca saiu, e a verificação acusaria
+fraude onde houve falha de rede.
+
+A prova de que funciona é executável:
+
+```bash
+docker compose cp scripts/prova_ancora.py api:/tmp/prova_ancora.py
+docker compose exec -e PYTHONPATH=/app -w /app api python /tmp/prova_ancora.py
+```
+
+Ela altera um evento em memória, recostura todos os elos seguintes e mostra o
+resultado: **0 quebras** sem âncora (a cadeia confere contra si mesma) e
+**quebras** com âncora.
+
+O que ainda falta é o destino: hoje a exportação grava um arquivo local, que
+**não é inviolável** — quem tem o disco reescreve os dois lados. A API diz isso
+na resposta (`destino_inviolavel: false`) e a tela mostra o aviso, em vez de
+anunciar garantia que o ambiente não tem. Em produção, troque o destino em
+`get_siem_exporter` por Splunk HEC, CloudWatch ou bucket com Object Lock: o
+caso de uso só conhece a porta `SiemExporter`, então é uma linha.
 
 ## Postgres
 

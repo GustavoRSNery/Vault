@@ -39,6 +39,7 @@ services:
       VAULT_MASTER_KEY_B64: ${VAULT_MASTER_KEY_B64:-bG9jYWxkZXZrZXkwMTIzNDU2Nzg5YWJjZGVmZ2hpams=}
       VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:-segredo-local-de-desenvolvimento-com-mais-de-32-bytes}
       VAULT_CORS_ORIGINS: '["http://vault.local","http://vault.localhost","http://localhost:8080"]'
+      VAULT_AUDIT_EXPORT_PATH: /exportacoes/trilha.jsonl
     depends_on:
       db:
         condition: service_healthy
@@ -50,6 +51,11 @@ services:
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8777:8000"
+    # A trilha exportada vive em volume proprio: ela e o registro EXTERNO
+    # contra o qual a ancora e conferida, entao perde-la ao recriar o
+    # container destruiria justamente a prova que ela existe para ser.
+    volumes:
+      - vault_exportacoes:/exportacoes
     restart: unless-stopped
 
   web:
@@ -73,3 +79,4 @@ services:
 
 volumes:
   vault_pgdata:
+  vault_exportacoes:

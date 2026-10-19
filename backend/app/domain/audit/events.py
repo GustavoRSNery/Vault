@@ -68,6 +68,7 @@ class AuditAction(StrEnum):
     ACCESS_APPROVED = "acesso_aprovado"
     ACCESS_DENIED_REQUEST = "acesso_solicitacao_negada"
     ACCESS_REVOKED = "acesso_revogado"
+    AUDIT_EXPORTED = "trilha_exportada"
 
 
 class AuditOutcome(StrEnum):

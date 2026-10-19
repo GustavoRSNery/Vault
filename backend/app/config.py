@@ -41,6 +41,13 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
+    # Destino da exportacao da trilha de auditoria. O arquivo local serve para
+    # desenvolvimento: ele NAO e inviolavel, e a API diz isso na resposta.
+    # Em producao, aponte para um destino somente-anexacao que a aplicacao nao
+    # possa reescrever (Splunk HEC, CloudWatch, bucket com Object Lock) — a
+    # troca e de uma linha em deps.py, porque o caso de uso so conhece a porta.
+    audit_export_path: str = "./exportacoes/trilha.jsonl"
+
     @field_validator("master_key_b64")
     @classmethod
     def _validate_master_key(cls, value: str) -> str:

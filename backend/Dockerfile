@@ -21,7 +21,11 @@ RUN pip install --no-cache-dir \
 COPY app ./app
 
 # Usuário sem privilégios: um cofre de senhas não roda como root.
-RUN useradd --create-home --uid 10001 vault && chown -R vault:vault /app
+# A pasta de exportações é criada e cedida ANTES do USER: montada como volume,
+# ela nasceria de root e o processo não conseguiria escrever a trilha.
+RUN useradd --create-home --uid 10001 vault \
+    && mkdir -p /exportacoes \
+    && chown -R vault:vault /app /exportacoes
 USER vault
 
 EXPOSE 8000

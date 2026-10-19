@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
-import { request } from '@/shared/api/client'
-import { Alerta, Badge, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { ApiError, request } from '@/shared/api/client'
+import { Alerta, Badge, Botao, Card, Carregando, Vazio } from '@/shared/ui/components'
 
 type Evento = {
   id: string
@@ -24,7 +25,16 @@ type Integridade = {
   integra: boolean
   eventos_verificados: number
   ancoras_conferidas: number
+  eventos_ancorados: number
   quebras: string[]
+  aviso: string | null
+}
+
+type Exportacao = {
+  exportados: number
+  ancora_sequencia: number | null
+  destino: string
+  destino_inviolavel: boolean
   aviso: string | null
 }
 
@@ -59,6 +69,10 @@ function formatarData(iso: string): string {
 }
 
 export function AuditoriaPage() {
+  const queryClient = useQueryClient()
+  const [exportacao, setExportacao] = useState<Exportacao | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+
   const { data: trilha, isLoading } = useQuery({
     queryKey: ['auditoria'],
     queryFn: () => request<Trilha>('/auditoria?limite=200'),
@@ -71,6 +85,17 @@ export function AuditoriaPage() {
     queryFn: () => request<Integridade>('/auditoria/integridade'),
     retry: false,
     enabled: trilha?.escopo === 'tudo',
+  })
+
+  const exportar = useMutation({
+    mutationFn: () => request<Exportacao>('/auditoria/exportar', { method: 'POST' }),
+    onSuccess: (dados) => {
+      setErro(null)
+      setExportacao(dados)
+      void queryClient.invalidateQueries({ queryKey: ['auditoria'] })
+    },
+    onError: (e) =>
+      setErro(e instanceof ApiError ? e.message : 'Não foi possível exportar.'),
   })
 
   if (isLoading) return <Carregando texto="Carregando trilha…" />
@@ -88,13 +113,37 @@ export function AuditoriaPage() {
       </header>
 
       {integridade && (
-        <Card titulo="Integridade da trilha">
+        <Card
+          titulo="Integridade da trilha"
+          acao={
+            <Botao
+              variante="secondary"
+              pequeno
+              onClick={() => exportar.mutate()}
+              disabled={exportar.isPending}
+            >
+              {exportar.isPending ? 'Exportando…' : 'Exportar e ancorar'}
+            </Botao>
+          }
+        >
           <div className="col" style={{ gap: 12 }}>
-            <div className="row" style={{ gap: 12 }}>
+            <div className="row wrap" style={{ gap: 12 }}>
               {integridade.integra ? (
                 <Badge tom="success">Cadeia íntegra</Badge>
               ) : (
                 <Badge tom="danger">Cadeia rompida</Badge>
+              )}
+              {integridade.ancoras_conferidas > 0 && (
+                <Badge
+                  tom={
+                    integridade.eventos_ancorados === integridade.eventos_verificados
+                      ? 'success'
+                      : 'warning'
+                  }
+                >
+                  {integridade.eventos_ancorados} de{' '}
+                  {integridade.eventos_verificados} ancorados
+                </Badge>
               )}
               <span className="muted">
                 {integridade.eventos_verificados} eventos verificados ·{' '}
@@ -105,6 +154,26 @@ export function AuditoriaPage() {
             {/* Sem âncora, "íntegra" garante menos do que parece. Dizer isso
                 evita que o selo verde passe uma confiança que ele não tem. */}
             {integridade.aviso && <Alerta tom="warning">{integridade.aviso}</Alerta>}
+
+            {erro && <Alerta tom="danger">{erro}</Alerta>}
+
+            {exportacao && (
+              <div className="col" style={{ gap: 8 }}>
+                <span className="help">
+                  {exportacao.exportados === 0
+                    ? `Nada novo a exportar. Destino: ${exportacao.destino}.`
+                    : `${exportacao.exportados} evento(s) enviados para ${exportacao.destino}` +
+                      (exportacao.ancora_sequencia !== null
+                        ? `; âncora na sequência ${exportacao.ancora_sequencia}.`
+                        : '.')}
+                </span>
+                {/* O destino local é editável por quem tem o disco. Anunciar
+                    garantia forte aqui seria mentir sobre o ambiente. */}
+                {exportacao.aviso && (
+                  <Alerta tom="warning">{exportacao.aviso}</Alerta>
+                )}
+              </div>
+            )}
 
             {integridade.quebras.map((quebra) => (
               <Alerta key={quebra} tom="danger">
