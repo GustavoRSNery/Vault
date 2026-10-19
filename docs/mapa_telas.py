@@ -80,7 +80,7 @@ ESTADO = {
     "Papéis e políticas": ("PAGINA", "/admin/politicas"),
     "Editor de política": ("PAGINA", "/admin/politicas, com simulador"),
     # Administracao
-    "Configurações": ("ABERTA", "prazos e retenção ainda por variável de ambiente"),
+    "Configurações": ("PAGINA", "/admin/configuracao"),
     "Integrações": ("ABERTA", "fase 3"),
     "Selagem e chaves": ("EMBUTIDA", "selar/desselar no detalhe do cofre; KMS em aberto"),
     "Backups": ("ABERTA", "responsabilidade de infraestrutura"),

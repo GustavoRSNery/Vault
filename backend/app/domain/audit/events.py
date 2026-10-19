@@ -75,6 +75,7 @@ class AuditAction(StrEnum):
     APPLICATION_AUTHENTICATED = "aplicacao_autenticada"
     APPLICATION_LEASES_REVOKED = "aplicacao_leases_revogados"
     APPLICATION_CREDENTIAL_ROTATED = "aplicacao_credencial_rotacionada"
+    SETTINGS_UPDATED = "configuracao_alterada"
 
 
 class AuditOutcome(StrEnum):

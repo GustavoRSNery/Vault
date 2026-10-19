@@ -12,9 +12,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
+import { useConfiguracao } from '@/shared/config/useConfiguracao'
 import { Botao } from '@/shared/ui/components'
 
-const SEGUNDOS_VISIVEL = 30
+/** Usado enquanto a configuração da instalação não chega. */
+const SEGUNDOS_VISIVEL_PADRAO = 30
 
 type RevealResponse = {
   secret_id: string
@@ -30,6 +32,12 @@ export function CampoSegredo({
   cofre: string
   segredo: string
 }) {
+  // O tempo de exibição vem da configuração da instalação; o padrão vale
+  // enquanto ela não chega, para o botão nunca ficar inerte.
+  const { data: configuracao } = useConfiguracao()
+  const segundosVisivel =
+    configuracao?.segundos_segredo_visivel ?? SEGUNDOS_VISIVEL_PADRAO
+
   const [valor, setValor] = useState<string | null>(null)
   const [restante, setRestante] = useState(0)
   const [ocupado, setOcupado] = useState(false)
@@ -82,7 +90,7 @@ export function CampoSegredo({
     if (recebido === null) return
 
     setValor(recebido)
-    setRestante(SEGUNDOS_VISIVEL)
+    setRestante(segundosVisivel)
     timerRef.current = window.setInterval(() => {
       setRestante((anterior) => {
         if (anterior <= 1) {
@@ -92,7 +100,7 @@ export function CampoSegredo({
         return anterior - 1
       })
     }, 1000)
-  }, [buscarValor, esconder])
+  }, [buscarValor, esconder, segundosVisivel])
 
   const copiar = useCallback(async () => {
     // Busca o valor de novo em vez de reaproveitar o revelado: copiar deve

@@ -36,6 +36,7 @@ from ...domain.inventory.entities import (
     Device,
     DeviceKind,
 )
+from ...domain.settings.entities import ConfiguracaoOperacional
 from ...domain.shared.errors import ConflictError, NotFoundError
 from ...domain.vaults.quorum import SeloComQuorum
 from ...domain.shared.value_objects import PolicyPath, Slug, utcnow
@@ -50,6 +51,7 @@ from ...domain.vaults.entities import (
 from .models import (
     AccessRequestModel,
     ApplicationModel,
+    ConfiguracaoModel,
     AuditAnchorModel,
     AuditEventModel,
     CertificateModel,
@@ -1249,5 +1251,64 @@ def _to_lease(model: LeaseModel) -> Lease:
         revoked_at=_aware(model.revoked_at),
         leituras=model.leituras,
         created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+class ConfiguracaoRepository:
+    """Linha unica de configuracao, criada na primeira leitura."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def atual(self) -> ConfiguracaoOperacional:
+        """A configuracao vigente, com os padroes quando nunca foi salva.
+
+        Criar a linha na primeira leitura evita um estado "sem configuracao"
+        que cada chamador teria de tratar — e tratar diferente em cada lugar
+        e como nascem divergencias.
+        """
+        model = self._session.get(ConfiguracaoModel, "unica")
+        if model is None:
+            padrao = ConfiguracaoOperacional()
+            model = ConfiguracaoModel(
+                id="unica",
+                segundos_segredo_visivel=padrao.segundos_segredo_visivel,
+                custodia_horas_padrao=padrao.custodia_horas_padrao,
+                alerta_certificado_dias=padrao.alerta_certificado_dias,
+                rotacao_dias_padrao=padrao.rotacao_dias_padrao,
+                trilha_limite_padrao=padrao.trilha_limite_padrao,
+            )
+            self._session.add(model)
+            self._session.flush()
+        return _to_configuracao(model)
+
+    def salvar(self, config: ConfiguracaoOperacional) -> ConfiguracaoOperacional:
+        model = self._session.get(ConfiguracaoModel, "unica")
+        if model is None:
+            self.atual()
+            model = self._session.get(ConfiguracaoModel, "unica")
+        assert model is not None
+
+        model.segundos_segredo_visivel = config.segundos_segredo_visivel
+        model.custodia_horas_padrao = config.custodia_horas_padrao
+        model.alerta_certificado_dias = config.alerta_certificado_dias
+        model.rotacao_dias_padrao = config.rotacao_dias_padrao
+        model.trilha_limite_padrao = config.trilha_limite_padrao
+        model.atualizado_por = config.atualizado_por
+        model.atualizado_em = config.atualizado_em
+        self._session.flush()
+        return _to_configuracao(model)
+
+
+def _to_configuracao(model: ConfiguracaoModel) -> ConfiguracaoOperacional:
+    return ConfiguracaoOperacional(
+        segundos_segredo_visivel=model.segundos_segredo_visivel,
+        custodia_horas_padrao=model.custodia_horas_padrao,
+        alerta_certificado_dias=model.alerta_certificado_dias,
+        rotacao_dias_padrao=model.rotacao_dias_padrao,
+        trilha_limite_padrao=model.trilha_limite_padrao,
+        atualizado_por=model.atualizado_por,
+        atualizado_em=_aware(model.atualizado_em),
         id=model.id,
     )

@@ -528,3 +528,33 @@ class LeaseModel(Base):
     )
     leituras: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = _now_column()
+
+
+class ConfiguracaoModel(Base):
+    """Configuracao operacional da instalacao. Linha unica.
+
+    A chave primaria fixa em "unica" e deliberada: configuracao por cofre ou
+    por equipe produziria combinacoes que ninguem revisa, e a pergunta "qual
+    prazo vale aqui?" deixaria de ter resposta unica.
+    """
+
+    __tablename__ = "configuracao"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default="unica")
+    segundos_segredo_visivel: Mapped[int] = mapped_column(
+        Integer, default=30, nullable=False
+    )
+    custodia_horas_padrao: Mapped[int] = mapped_column(
+        Integer, default=4, nullable=False
+    )
+    alerta_certificado_dias: Mapped[int] = mapped_column(
+        Integer, default=30, nullable=False
+    )
+    rotacao_dias_padrao: Mapped[int] = mapped_column(
+        Integer, default=90, nullable=False
+    )
+    trilha_limite_padrao: Mapped[int] = mapped_column(
+        Integer, default=200, nullable=False
+    )
+    atualizado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    atualizado_em: Mapped[datetime] = _now_column()

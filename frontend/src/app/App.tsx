@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from '@/features/auth/AuthContext'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { PerfilPage } from '@/features/auth/PerfilPage'
 import { AuditoriaPage } from '@/features/audit/AuditoriaPage'
+import { ConfiguracaoPage } from '@/features/admin/ConfiguracaoPage'
 import { PoliticasPage } from '@/features/admin/PoliticasPage'
 import { SolicitacoesPage } from '@/features/approvals/SolicitacoesPage'
 import { AplicacoesPage } from '@/features/machines/AplicacoesPage'
@@ -59,6 +60,7 @@ function Rotas() {
         <Route path="admin/usuarios" element={<UsuariosPage />} />
         <Route path="admin/politicas" element={<PoliticasPage />} />
         <Route path="admin/aplicacoes" element={<AplicacoesPage />} />
+        <Route path="admin/configuracao" element={<ConfiguracaoPage />} />
         <Route path="*" element={<NaoEncontrada />} />
       </Route>
     </Routes>

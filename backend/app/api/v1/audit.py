@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from ...application.audit.export_chain import ExportChain
@@ -24,6 +25,7 @@ from ..deps import (
     CurrentUser,
     get_audit,
     get_current_user,
+    get_db,
     get_policies,
     get_siem_exporter,
 )
@@ -87,8 +89,12 @@ def listar_eventos(
     current: Annotated[CurrentUser, Depends(get_current_user)],
     audit: Annotated[AuditRepository, Depends(get_audit)],
     policies: Annotated[PolicyRepository, Depends(get_policies)],
-    limite: Annotated[int, Query(ge=1, le=500)] = 100,
+    db: Annotated[Session, Depends(get_db)],
+    limite: Annotated[int | None, Query(ge=1, le=1000)] = None,
 ) -> TrilhaResponse:
+    from ...infrastructure.db.repositories import ConfiguracaoRepository
+
+    efetivo = limite or ConfiguracaoRepository(db).atual().trilha_limite_padrao
     pode_ver_tudo = evaluate(
         policies.policies_for_user(current.id), CAMINHO_AUDITORIA, Capability.ADMIN
     )
@@ -98,7 +104,7 @@ def listar_eventos(
         eventos = [e for e in eventos if e.actor_id == current.id]
 
     # Mais recentes primeiro: é o que se quer ver numa trilha.
-    recentes = list(reversed(eventos))[:limite]
+    recentes = list(reversed(eventos))[:efetivo]
 
     return TrilhaResponse(
         eventos=[

@@ -20,6 +20,7 @@ const ITENS_ADMIN = [
   { para: '/admin/usuarios', rotulo: 'Pessoas', fim: false },
   { para: '/admin/politicas', rotulo: 'Políticas', fim: false },
   { para: '/admin/aplicacoes', rotulo: 'Aplicações', fim: false },
+  { para: '/admin/configuracao', rotulo: 'Configurações', fim: false },
 ]
 
 export function Layout() {

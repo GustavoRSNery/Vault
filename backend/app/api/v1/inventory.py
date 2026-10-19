@@ -28,6 +28,7 @@ from ...domain.shared.errors import DomainError, PermissionDeniedError
 from ...domain.shared.value_objects import PolicyPath, Slug
 from ...infrastructure.db.repositories import (
     AuditRepository,
+    ConfiguracaoRepository,
     CertificateRepository,
     CredentialRepository,
     DeviceRepository,
@@ -114,7 +115,8 @@ class CriarCredencialRequest(BaseModel):
 
 class RetirarRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
-    hours: int = Field(default=4, ge=1, le=720)
+    # None usa o prazo padrão da configuração; o teto continua no domínio.
+    hours: int | None = Field(default=None, ge=1, le=720)
 
 
 class DevolverRequest(BaseModel):
@@ -380,10 +382,9 @@ def retirar_credencial(
         current, policies, audit, db, credencial.path, Capability.UPDATE,
         "Sem permissão para retirar esta credencial.",
     )
+    horas = payload.hours or ConfiguracaoRepository(db).atual().custodia_horas_padrao
     try:
-        credencial.check_out(
-            current.id, current.email, payload.reason, payload.hours
-        )
+        credencial.check_out(current.id, current.email, payload.reason, horas)
     except DomainError as erro:
         # Conflito de custódia também é informação de auditoria: diz quem
         # tentou pegar uma credencial que já estava na mão de outra pessoa.
@@ -405,7 +406,7 @@ def retirar_credencial(
             current,
             AuditAction.CREDENTIAL_CHECKED_OUT,
             str(credencial.path),
-            reason=f"Prazo de {payload.hours}h. Motivo: {payload.reason}",
+            reason=f"Prazo de {horas}h. Motivo: {payload.reason}",
         )
     )
     return _credencial_response(salva, _dispositivo_de(devices, salva))
@@ -502,10 +503,14 @@ def listar_certificados(
     current: Annotated[CurrentUser, Depends(get_current_user)],
     certificates: Annotated[CertificateRepository, Depends(get_certificates)],
     policies: Annotated[PolicyRepository, Depends(get_policies)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> list[CertificadoResponse]:
     todos = certificates.list_all()
     permitidos = _visiveis(policies, current, [c.path for c in todos])
-    return [_certificado_response(c) for c in todos if str(c.path) in permitidos]
+    alerta = ConfiguracaoRepository(db).atual().alerta_certificado_dias
+    return [
+        _certificado_response(c, alerta) for c in todos if str(c.path) in permitidos
+    ]
 
 
 @router.post(
@@ -590,7 +595,16 @@ def _credencial_response(
     )
 
 
-def _certificado_response(certificado: Certificate) -> CertificadoResponse:
+def _certificado_response(
+    certificado: Certificate, alerta_dias: int | None = None
+) -> CertificadoResponse:
+    # A faixa de alerta vem da configuração da instalação; o padrão do
+    # domínio continua valendo quando ninguém informou outra.
+    estado = (
+        certificado.state()
+        if alerta_dias is None
+        else _estado_com_faixa(certificado, alerta_dias)
+    )
     return CertificadoResponse(
         id=certificado.id,
         name=str(certificado.name),
@@ -602,6 +616,22 @@ def _certificado_response(certificado: Certificate) -> CertificadoResponse:
         not_before=certificado.not_before,
         not_after=certificado.not_after,
         description=certificado.description,
-        estado=str(certificado.state()),
+        estado=estado,
         dias_restantes=certificado.days_remaining(),
     )
+
+
+def _estado_com_faixa(certificado: Certificate, alerta_dias: int) -> str:
+    """Estado do certificado com a faixa de alerta configurada.
+
+    A regra de "vencido" continua no domínio; só a largura da faixa de aviso
+    é ajustável — quem configura escolhe com quanta antecedência quer ser
+    avisado, não o que conta como vencido.
+    """
+    from ...domain.inventory.entities import CertificateState
+
+    if certificado.is_expired():
+        return str(CertificateState.EXPIRED)
+    if certificado.days_remaining() <= alerta_dias:
+        return str(CertificateState.EXPIRING)
+    return str(CertificateState.VALID)

@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**48 das 57 telas** do inventário de arquitetura, **64 endpoints**, **511
+**49 das 57 telas** do inventário de arquitetura, **66 endpoints**, **527
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 
@@ -288,6 +288,20 @@ que o editor de políticas valha para os dois, em vez de haver um sistema de
 permissão paralelo que ninguém revisa. E o lease carrega as **negações** junto
 do escopo: um `allow` amplo não engole um `deny` específico, senão a máquina
 teria mais acesso que a pessoa a quem a mesma política se aplica.
+
+**O que a configuração não permite.** A tela de Configurações ajusta prazos
+operacionais — tempo de exibição de um segredo, custódia padrão, faixa de
+alerta de certificado. Ficam fora, no código: quórum mínimo de 2 pessoas,
+teto de 12h do acesso de máquina, tamanhos de chave e nonce.
+
+A pergunta que separa os dois grupos é se o pior valor possível enfraquece a
+segurança. Configuração que permite desligar a própria proteção é pior que
+configuração nenhuma: dá impressão de flexibilidade e entrega um sistema que
+se desarma na primeira pressa.
+
+Cada alteração registra o antes e o depois na trilha — "configuração
+alterada" não permitiria revisar nada, e mudança silenciosa de prazo é
+exatamente o que uma auditoria procura.
 
 ## Limites conhecidos da auditoria
 
