@@ -64,6 +64,10 @@ class AuditAction(StrEnum):
     CREDENTIAL_CHECKOUT_DENIED = "credencial_retirada_negada"
     CREDENTIAL_ROTATED = "credencial_rotacionada"
     CERTIFICATE_CREATED = "certificado_cadastrado"
+    ACCESS_REQUESTED = "acesso_solicitado"
+    ACCESS_APPROVED = "acesso_aprovado"
+    ACCESS_DENIED_REQUEST = "acesso_solicitacao_negada"
+    ACCESS_REVOKED = "acesso_revogado"
 
 
 class AuditOutcome(StrEnum):

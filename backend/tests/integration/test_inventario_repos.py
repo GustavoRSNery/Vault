@@ -91,8 +91,11 @@ class TestFronteiraDeTimezone:
         assert lido.not_before.tzinfo is not None
         assert lido.created_at.tzinfo is not None
         # A conta que estourava: subtrair aware de naive.
-        assert lido.days_remaining() == 29
-        assert lido.state() is CertificateState.EXPIRING
+        # `now` fixo de proposito: comparar com o relogio real torna o teste
+        # instavel — (agora+30d) - agora da 29d23h59m, que trunca para 29,
+        # mas vira 30 se a execucao cruzar a virada de um segundo.
+        assert lido.days_remaining(now=agora) == 30
+        assert lido.state(now=agora) is CertificateState.EXPIRING
 
     def test_credencial_lida_de_volta_tem_timezone(
         self, session: Session, dispositivo: Device
@@ -113,8 +116,8 @@ class TestFronteiraDeTimezone:
         assert lida.last_rotated_at is not None
         assert lida.last_rotated_at.tzinfo is not None
         assert lida.created_at.tzinfo is not None
-        assert lida.is_overdue() is False
-        assert lida.days_until_due() == 79
+        assert lida.is_overdue(now=agora) is False
+        assert lida.days_until_due(now=agora) == 80
 
     def test_custodia_lida_de_volta_tem_timezone(
         self, session: Session, dispositivo: Device, pessoa: UserModel

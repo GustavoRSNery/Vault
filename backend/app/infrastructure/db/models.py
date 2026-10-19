@@ -358,3 +358,42 @@ class CertificateModel(Base):
     )
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = _now_column()
+
+
+class AccessRequestModel(Base):
+    """Solicitacao de acesso temporario.
+
+    A concessao aprovada NAO vira regra de politica: vive aqui, com prazo, e a
+    avaliacao a soma as politicas no momento da decisao. Assim ela caduca
+    sozinha — ninguem precisa lembrar de remover, que e como acesso temporario
+    vira permanente na pratica.
+    """
+
+    __tablename__ = "solicitacoes_acesso"
+
+    id: Mapped[str] = _id_column()
+    requester_id: Mapped[str] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    requester_label: Mapped[str] = mapped_column(String(254), nullable=False)
+    path: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    hours: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pendente", nullable=False, index=True
+    )
+    # RESTRICT e nao SET NULL: perder quem decidiu apagaria a prestacao de
+    # contas justamente do registro que existe para prestar contas.
+    decided_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=True
+    )
+    decided_by_label: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    decision_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    granted_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = _now_column()

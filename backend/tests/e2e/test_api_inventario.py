@@ -368,6 +368,8 @@ class TestRotacao:
         assert resposta.status_code == 200
         assert resposta.json()["atrasada"] is False
         assert resposta.json()["last_rotated_at"] is not None
+        # Faixa, nao valor exato: a API calcula contra o relogio real e
+        # 90 dias cheios truncam para 89 quando passa um instante da rotacao.
         assert resposta.json()["dias_para_vencer"] in (89, 90)
 
     def test_prazo_zero_nunca_fica_atrasada(

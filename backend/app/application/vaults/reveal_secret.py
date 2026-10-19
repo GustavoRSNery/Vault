@@ -5,7 +5,9 @@ verificações que o resto do código assume terem acontecido:
 
 1. O cofre não pode estar selado.
 2. A política precisa conceder REVEAL — que é mais forte que READ: ver que um
-   segredo existe não é o mesmo que ver seu valor.
+   segredo existe não é o mesmo que ver seu valor. Uma concessão temporária
+   aprovada também vale, mas nunca derruba um `deny` explícito: a composição
+   está em `decide`, no domínio, e não é refeita aqui.
 3. Toda revelação vira evento de auditoria, inclusive as negadas. Negativa sem
    registro é justamente o que um atacante tentando permissões quer.
 4. O valor em claro só existe no retorno; nada dele vai para log ou auditoria.
@@ -16,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ...domain.access.policy import Capability
+from ...domain.approvals.entities import decide
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
 from ...domain.shared.errors import PermissionDeniedError
 from ...domain.shared.value_objects import Slug
@@ -66,12 +69,16 @@ class RevealSecret:
         policies,        # PolicyRepository
         audit,           # AuditRepository
         crypto: CryptoService,
+        requests=None,   # AccessRequestRepository | None
     ) -> None:
         self._vaults = vaults
         self._secrets = secrets
         self._policies = policies
         self._audit = audit
         self._crypto = crypto
+        # Opcional: sem ele, só as políticas decidem. Mantém compatível quem
+        # constrói o caso de uso sem conhecer o fluxo de aprovações.
+        self._requests = requests
 
     def execute(self, command: RevealSecretCommand) -> RevealedSecret:
         vault = self._vaults.get_by_name(Slug(command.vault_name))
@@ -79,13 +86,22 @@ class RevealSecret:
         path = vault.secret_path(secret_name)
 
         user_policies = self._policies.policies_for_user(command.actor_id)
+        concessoes = (
+            self._requests.active_grants_for(command.actor_id)
+            if self._requests is not None
+            else []
+        )
 
-        from ...domain.access.policy import evaluate
-
-        if not evaluate(user_policies, path, Capability.REVEAL):
-            self._record(command, path, AuditAction.ACCESS_DENIED, AuditOutcome.FAILURE,
-                         "A política não concede revelação neste caminho.")
-            raise PermissionDeniedError("Você não tem permissão para revelar este segredo.")
+        permitido, motivo = decide(
+            user_policies, concessoes, path, Capability.REVEAL
+        )
+        if not permitido:
+            self._record(
+                command, path, AuditAction.ACCESS_DENIED, AuditOutcome.FAILURE, motivo
+            )
+            raise PermissionDeniedError(
+                "Você não tem permissão para revelar este segredo."
+            )
 
         # O selo é checado DEPOIS da política, de propósito: quem não tem
         # acesso não deve descobrir, pela mensagem de erro, se o cofre existe
@@ -101,7 +117,16 @@ class RevealSecret:
         version = secret.current_version
         plaintext = self._crypto.decrypt(version.value)
 
-        self._record(command, path, AuditAction.SECRET_REVEALED, AuditOutcome.SUCCESS, "")
+        # Quando o acesso veio de uma concessão temporária, a trilha precisa
+        # dizer isso: um REVEAL fora da política habitual é exatamente o que
+        # uma revisão quer encontrar, e sem o motivo pareceria acesso normal.
+        self._record(
+            command,
+            path,
+            AuditAction.SECRET_REVEALED,
+            AuditOutcome.SUCCESS,
+            motivo if "concessão" in motivo else "",
+        )
 
         return RevealedSecret(
             secret_id=secret.id,

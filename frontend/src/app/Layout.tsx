@@ -7,6 +7,7 @@ const ITENS = [
   { para: '/dispositivos', rotulo: 'Dispositivos', fim: false },
   { para: '/credenciais', rotulo: 'Credenciais', fim: false },
   { para: '/certificados', rotulo: 'Certificados', fim: false },
+  { para: '/solicitacoes', rotulo: 'Solicitações', fim: false },
   { para: '/auditoria', rotulo: 'Auditoria', fim: false },
   { para: '/perfil', rotulo: 'Perfil', fim: false },
 ]

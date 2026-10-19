@@ -17,6 +17,7 @@ from ...domain.shared.value_objects import Slug
 from ...domain.vaults.entities import Secret, SecretKind, Vault
 from ...infrastructure.crypto.envelope import EnvelopeCryptoService
 from ...infrastructure.db.repositories import (
+    AccessRequestRepository,
     AuditRepository,
     PolicyRepository,
     SecretRepository,
@@ -241,7 +242,12 @@ def revelar_segredo(
     """POST, não GET, de propósito: GET entra em log de acesso, histórico do
     navegador e cache de proxy. A revelação de um segredo não deve passar por
     nenhum dos três."""
-    caso = RevealSecret(vaults, secrets, policies, audit, crypto)
+    # O repositório de solicitações entra aqui para que uma concessão
+    # temporária aprovada valha de fato — sem isto o fluxo de aprovação
+    # seria decorativo: aprovaria e não daria acesso nenhum.
+    caso = RevealSecret(
+        vaults, secrets, policies, audit, crypto, AccessRequestRepository(db)
+    )
     try:
         revelado = caso.execute(
             RevealSecretCommand(

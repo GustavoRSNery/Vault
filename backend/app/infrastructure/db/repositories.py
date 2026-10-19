@@ -21,6 +21,7 @@ from ...domain.audit.events import (
     AuditOutcome,
     ChainAnchor,
 )
+from ...domain.approvals.entities import AccessRequest, RequestStatus
 from ...domain.inventory.entities import (
     Certificate,
     Checkout,
@@ -40,6 +41,7 @@ from ...domain.vaults.entities import (
     VaultState,
 )
 from .models import (
+    AccessRequestModel,
     AuditAnchorModel,
     AuditEventModel,
     CertificateModel,
@@ -762,6 +764,108 @@ def _to_certificate(model: CertificateModel) -> Certificate:
         serial=model.serial,
         secret_id=model.secret_id,
         description=model.description,
+        created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+class AccessRequestRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, pedido: AccessRequest) -> AccessRequest:
+        self._session.add(
+            AccessRequestModel(
+                id=pedido.id,
+                requester_id=pedido.requester_id,
+                requester_label=pedido.requester_label,
+                path=str(pedido.path),
+                capabilities=sorted(str(c) for c in pedido.capabilities),
+                reason=pedido.reason,
+                hours=pedido.hours,
+                status=str(pedido.status),
+                decided_by_id=pedido.decided_by_id,
+                decided_by_label=pedido.decided_by_label,
+                decision_note=pedido.decision_note,
+                decided_at=pedido.decided_at,
+                granted_until=pedido.granted_until,
+                created_at=pedido.created_at,
+            )
+        )
+        self._session.flush()
+        return pedido
+
+    def get(self, request_id: str) -> AccessRequest:
+        model = self._session.get(AccessRequestModel, request_id)
+        if model is None:
+            raise NotFoundError("Solicitacao nao encontrada.")
+        return _to_access_request(model)
+
+    def list_all(self) -> list[AccessRequest]:
+        models = self._session.scalars(
+            select(AccessRequestModel).order_by(AccessRequestModel.created_at.desc())
+        ).all()
+        return [_to_access_request(m) for m in models]
+
+    def list_for_requester(self, user_id: str) -> list[AccessRequest]:
+        models = self._session.scalars(
+            select(AccessRequestModel)
+            .where(AccessRequestModel.requester_id == user_id)
+            .order_by(AccessRequestModel.created_at.desc())
+        ).all()
+        return [_to_access_request(m) for m in models]
+
+    def list_pending(self) -> list[AccessRequest]:
+        """Fila do aprovador: mais antigas primeiro, que e a ordem de atender."""
+        models = self._session.scalars(
+            select(AccessRequestModel)
+            .where(AccessRequestModel.status == "pendente")
+            .order_by(AccessRequestModel.created_at)
+        ).all()
+        return [_to_access_request(m) for m in models]
+
+    def active_grants_for(self, user_id: str) -> list[AccessRequest]:
+        """Concessoes que podem estar valendo agora para este usuario.
+
+        Filtra por status no banco; o prazo e conferido no dominio, para que a
+        regra de "ainda vale" exista num lugar so.
+        """
+        models = self._session.scalars(
+            select(AccessRequestModel).where(
+                AccessRequestModel.requester_id == user_id,
+                AccessRequestModel.status == "aprovada",
+            )
+        ).all()
+        return [_to_access_request(m) for m in models]
+
+    def save(self, pedido: AccessRequest) -> AccessRequest:
+        model = self._session.get(AccessRequestModel, pedido.id)
+        if model is None:
+            raise NotFoundError("Solicitacao nao encontrada.")
+        model.status = str(pedido.status)
+        model.decided_by_id = pedido.decided_by_id
+        model.decided_by_label = pedido.decided_by_label
+        model.decision_note = pedido.decision_note
+        model.decided_at = pedido.decided_at
+        model.granted_until = pedido.granted_until
+        self._session.flush()
+        return _to_access_request(model)
+
+
+def _to_access_request(model: AccessRequestModel) -> AccessRequest:
+    return AccessRequest(
+        requester_id=model.requester_id,
+        requester_label=model.requester_label,
+        path=PolicyPath(model.path),
+        capabilities=frozenset(Capability(c) for c in model.capabilities),
+        reason=model.reason,
+        hours=model.hours,
+        status=RequestStatus(model.status),
+        decided_by_id=model.decided_by_id,
+        decided_by_label=model.decided_by_label,
+        decision_note=model.decision_note,
+        decided_at=_aware(model.decided_at),
+        granted_until=_aware(model.granted_until),
         created_at=_aware(model.created_at),
         id=model.id,
     )

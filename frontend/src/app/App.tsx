@@ -5,6 +5,7 @@ import { LoginPage } from '@/features/auth/LoginPage'
 import { PerfilPage } from '@/features/auth/PerfilPage'
 import { AuditoriaPage } from '@/features/audit/AuditoriaPage'
 import { PoliticasPage } from '@/features/admin/PoliticasPage'
+import { SolicitacoesPage } from '@/features/approvals/SolicitacoesPage'
 import { CertificadosPage } from '@/features/inventory/CertificadosPage'
 import { CredenciaisPage } from '@/features/inventory/CredenciaisPage'
 import { DispositivosPage } from '@/features/inventory/DispositivosPage'
@@ -47,6 +48,7 @@ function Rotas() {
         <Route path="dispositivos" element={<DispositivosPage />} />
         <Route path="credenciais" element={<CredenciaisPage />} />
         <Route path="certificados" element={<CertificadosPage />} />
+        <Route path="solicitacoes" element={<SolicitacoesPage />} />
         <Route path="perfil" element={<PerfilPage />} />
         <Route path="admin/usuarios" element={<UsuariosPage />} />
         <Route path="admin/politicas" element={<PoliticasPage />} />
