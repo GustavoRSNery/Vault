@@ -6,6 +6,41 @@ código já conta o quê.
 
 ---
 
+## 2026-10-19 — Consumo por segredo (fecha a fase 2)
+
+**Decidi:** derivar o consumo da trilha de auditoria, em vez de criar tabela
+de contadores.
+**Porque:** a trilha já é a fonte de verdade do que foi lido. Um contador
+paralelo divergiria dela no primeiro erro de escrita, e aí haveria dois
+números e nenhuma certeza sobre qual vale.
+**Descartei:** tabela `consumo` com incremento a cada leitura — mais rápida de
+consultar, mas é a segunda fonte de verdade que sempre diverge.
+**Custo aceito:** uma agregação por consulta. É tela de análise, ninguém abre
+em laço.
+
+**Feito:** `GET /aplicacoes/{nome}/consumo` com o que foi lido, o que foi
+negado, o escopo atual e — o que justifica a tela — os caminhos concedidos e
+**nunca usados**.
+
+**Validado:** 496 testes em SQLite e Postgres, 4 mutantes mortos. No ambiente
+real: 10 leituras contadas por caminho, 6 negativas em `token-sefaz`
+(negado na política) e o alerta de escopo ocioso sem falso positivo.
+**Commit:** `0eb0778` Consumo por segredo das aplicações
+
+**Surpresa (duas):**
+
+1. O cofre era resolvido **antes** da checagem de escopo, então a resposta
+   distinguia "cofre não existe" (404) de "fora do escopo" (403). Um robô
+   comprometido mapearia todos os cofres pela mensagem de erro, sem permissão
+   para ler nenhum. Só apareceu porque o teste de negativas usou um cofre
+   inexistente por acaso.
+2. `nunca_lidos` acusava falso positivo: `cofres/contabil` (sem curinga) casa
+   só com o caminho exato, e as leituras vão para `cofres/contabil/segredos/x`
+   — o cofre aparecia como ocioso com tudo sendo lido dentro dele. Alerta
+   falso é pior que alerta nenhum: ensina a ignorar o aviso.
+
+---
+
 ## 2026-10-19 — Acesso de máquina para RPAs (fase 2)
 
 **Decidi:** AppRole (`role_id` público + `secret_id` segredo) com leases
@@ -220,8 +255,6 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
 - [ ] **Recuperação de senha e convite de usuário** — **BLOQUEADO:** exige
       envio de e-mail (SES ou equivalente).
 - [ ] **Regras de notificação** — **BLOQUEADO:** exige canal de envio.
-- [ ] **Consumo por segredo** — hoje o lease conta leituras no total; saber
-      *qual* segredo cada robô mais lê ajuda a enxugar escopo. Pequeno.
 - [ ] **Rotação automática do secret_id** — hoje é emitir/revogar à mão.
 - [ ] **Fase 3: gravação de sessão** — 3 telas. Escopo grande, avaliar se vale.
 - [ ] **Configurações na interface** — prazos e retenção hoje por variável de
