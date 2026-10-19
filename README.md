@@ -15,6 +15,10 @@ e conferidos no navegador.
 
 `python docs/mapa_telas.py` imprime o cruzamento tela a tela.
 
+O que depende de serviço externo está atrás de uma porta, com adaptador
+local funcionando e o de produção esboçado:
+**[docs/conectar-adaptadores.md](docs/conectar-adaptadores.md)**.
+
 | Entregue | Em aberto |
 | --- | --- |
 | Login (Argon2id) e MFA por TOTP, com cadastro em duas etapas | Recuperação de senha e convite (dependem de envio de e-mail) |
