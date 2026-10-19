@@ -6,6 +6,38 @@ código já conta o quê.
 
 ---
 
+## 2026-10-19 — Rotação de credencial pelo próprio robô
+
+**Decidi:** NÃO criar agendador interno de rotação.
+**Porque:** um processo de rotação dentro do Vault competiria com o
+orquestrador que a empresa já tem, e um cofre com cron embutido é mais uma
+coisa para monitorar e mais um ponto de falha. Quem sabe quando é seguro
+trocar é o próprio robô — entre dois ciclos, não no meio de um.
+**Descartei:** job interno que rotaciona por calendário.
+**Em troca:** endpoint `/maquina/renovar` (o robô se vira) + relatório de
+vencimentos (quem quiser automatizar por fora tem os dados).
+
+**Decidi também:** a credencial antiga ganha **10 minutos de graça** em vez
+de morrer na hora.
+**Porque:** matar na hora derrubaria um robô com a credencial velha em
+memória no meio de um ciclo — a rotação existe para evitar incidente, não
+para causar um. Curto de propósito: graça longa é credencial velha viva.
+**Reversível:** `GRACA_PADRAO_MINUTOS` em `domain/machines/entities.py`.
+
+**Feito:** `aposentar_com_graca` e `dias_para_vencer` no domínio, duas rotas,
+e dois alertas no topo da tela de Aplicações.
+
+**Validado:** 511 testes em SQLite e Postgres, 2 mutantes mortos. No ambiente
+real: robô trocou a própria credencial, as duas autenticaram durante a graça,
+credencial errada recusada (401), relatório pegou a que vence em 9 dias.
+**Commit:** `7b73aa5` Rotação de credencial pelo próprio robô
+
+**Detalhe que vale lembrar:** a nova credencial é emitida ANTES de a antiga
+ser aposentada. Se a emissão falhar, a antiga continua intacta e o robô segue
+funcionando — mesma lógica da exportação da trilha (enviar antes de ancorar).
+
+---
+
 ## 2026-10-19 — Consumo por segredo (fecha a fase 2)
 
 **Decidi:** derivar o consumo da trilha de auditoria, em vez de criar tabela
@@ -255,7 +287,6 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
 - [ ] **Recuperação de senha e convite de usuário** — **BLOQUEADO:** exige
       envio de e-mail (SES ou equivalente).
 - [ ] **Regras de notificação** — **BLOQUEADO:** exige canal de envio.
-- [ ] **Rotação automática do secret_id** — hoje é emitir/revogar à mão.
 - [ ] **Fase 3: gravação de sessão** — 3 telas. Escopo grande, avaliar se vale.
 - [ ] **Configurações na interface** — prazos e retenção hoje por variável de
       ambiente. Baixo valor enquanto o sistema tem um administrador só.
