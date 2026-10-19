@@ -627,3 +627,52 @@ class EventoSessaoModel(Base):
         # faria uma ordenacao completa.
         Index("ix_evento_sessao_ordem", "sessao_id", "deslocamento_ms"),
     )
+
+
+class ConviteModel(Base):
+    """Link de uso unico: convite de usuario ou redefinicao de senha.
+
+    So o HASH do token e guardado. Se o token em claro ficasse aqui, um dump
+    do banco entregaria um link que redefine a senha de qualquer pessoa.
+    """
+
+    __tablename__ = "convites"
+
+    id: Mapped[str] = _id_column()
+    email: Mapped[str] = mapped_column(String(254), nullable=False, index=True)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    token_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    estado: Mapped[str] = mapped_column(
+        String(20), default="pendente", nullable=False, index=True
+    )
+    nome_sugerido: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    papeis: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    criado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    expira_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    usado_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    criado_em: Mapped[datetime] = _now_column()
+
+
+class PedidoRedefinicaoModel(Base):
+    """Pedido de quem nao tem MFA e precisa da senha redefinida."""
+
+    __tablename__ = "pedidos_redefinicao"
+
+    id: Mapped[str] = _id_column()
+    email: Mapped[str] = mapped_column(String(254), nullable=False, index=True)
+    motivo: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    atendido: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
+    atendido_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    atendido_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    criado_em: Mapped[datetime] = _now_column()

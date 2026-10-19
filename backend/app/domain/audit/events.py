@@ -80,6 +80,13 @@ class AuditAction(StrEnum):
     SESSION_CLOSED = "sessao_encerrada"
     SESSION_TERMINATED = "sessao_derrubada"
     SESSION_REPLAYED = "sessao_reproduzida"
+    USER_INVITED = "usuario_convidado"
+    USER_JOINED = "usuario_entrou"
+    INVITE_CANCELLED = "convite_cancelado"
+    PASSWORD_RESET = "senha_redefinida"
+    PASSWORD_RESET_FAILED = "senha_redefinicao_falhou"
+    PASSWORD_RESET_REQUESTED = "senha_redefinicao_pedida"
+    PASSWORD_RESET_APPROVED = "senha_redefinicao_aprovada"
 
 
 class AuditOutcome(StrEnum):

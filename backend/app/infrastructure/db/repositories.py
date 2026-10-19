@@ -36,6 +36,12 @@ from ...domain.inventory.entities import (
     Device,
     DeviceKind,
 )
+from ...domain.onboarding.entities import (
+    Convite,
+    EstadoDoConvite,
+    PedidoDeRedefinicao,
+    TipoDeConvite,
+)
 from ...domain.sessions.entities import (
     EstadoDaSessao,
     EventoDeSessao,
@@ -46,7 +52,7 @@ from ...domain.sessions.entities import (
 from ...domain.settings.entities import ConfiguracaoOperacional
 from ...domain.shared.errors import ConflictError, NotFoundError
 from ...domain.vaults.quorum import SeloComQuorum
-from ...domain.shared.value_objects import PolicyPath, Slug, utcnow
+from ...domain.shared.value_objects import Email, PolicyPath, Slug, utcnow
 from ...domain.vaults.entities import (
     EncryptedValue,
     Secret,
@@ -63,9 +69,11 @@ from .models import (
     AuditEventModel,
     CertificateModel,
     CheckoutModel,
+    ConviteModel,
     CredentialModel,
     DeviceModel,
     LeaseModel,
+    PedidoRedefinicaoModel,
     PolicyModel,
     PolicyRuleModel,
     RoleModel,
@@ -1494,5 +1502,136 @@ def _to_sessao(model: SessaoModel) -> Sessao:
         encerrada_em=_aware(model.encerrada_em),
         encerrada_por=model.encerrada_por,
         motivo_encerramento=model.motivo_encerramento,
+        id=model.id,
+    )
+
+
+class ConviteRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, convite: Convite) -> Convite:
+        self._session.add(
+            ConviteModel(
+                id=convite.id,
+                email=str(convite.email),
+                tipo=str(convite.tipo),
+                token_hash=convite.token_hash,
+                estado=str(convite.estado),
+                nome_sugerido=convite.nome_sugerido,
+                papeis=list(convite.papeis),
+                criado_por=convite.criado_por,
+                expira_em=convite.expira_em,
+                criado_em=convite.criado_em,
+            )
+        )
+        self._session.flush()
+        return convite
+
+    def por_token(self, token: str) -> Convite | None:
+        """Procura pelo hash do token apresentado.
+
+        A busca e por hash, no indice: varrer todos os convites comparando um
+        a um seria O(n) a cada tentativa, e um atacante usaria isso.
+        """
+        import hashlib
+
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        model = self._session.scalar(
+            select(ConviteModel).where(ConviteModel.token_hash == digest)
+        )
+        return _to_convite(model) if model is not None else None
+
+    def get(self, convite_id: str) -> Convite:
+        model = self._session.get(ConviteModel, convite_id)
+        if model is None:
+            raise NotFoundError("Convite nao encontrado.")
+        return _to_convite(model)
+
+    def pendentes(self) -> list[Convite]:
+        models = self._session.scalars(
+            select(ConviteModel)
+            .where(ConviteModel.estado == "pendente")
+            .order_by(ConviteModel.criado_em.desc())
+        ).all()
+        return [_to_convite(m) for m in models]
+
+    def save(self, convite: Convite) -> Convite:
+        model = self._session.get(ConviteModel, convite.id)
+        if model is None:
+            raise NotFoundError("Convite nao encontrado.")
+        model.estado = str(convite.estado)
+        model.usado_em = convite.usado_em
+        self._session.flush()
+        return _to_convite(model)
+
+
+class PedidoRedefinicaoRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, pedido: PedidoDeRedefinicao) -> PedidoDeRedefinicao:
+        self._session.add(
+            PedidoRedefinicaoModel(
+                id=pedido.id,
+                email=str(pedido.email),
+                motivo=pedido.motivo,
+                ip_address=pedido.ip_address,
+                criado_em=pedido.criado_em,
+            )
+        )
+        self._session.flush()
+        return pedido
+
+    def pendentes(self) -> list[PedidoDeRedefinicao]:
+        models = self._session.scalars(
+            select(PedidoRedefinicaoModel)
+            .where(PedidoRedefinicaoModel.atendido.is_(False))
+            .order_by(PedidoRedefinicaoModel.criado_em)
+        ).all()
+        return [_to_pedido(m) for m in models]
+
+    def get(self, pedido_id: str) -> PedidoDeRedefinicao:
+        model = self._session.get(PedidoRedefinicaoModel, pedido_id)
+        if model is None:
+            raise NotFoundError("Pedido nao encontrado.")
+        return _to_pedido(model)
+
+    def save(self, pedido: PedidoDeRedefinicao) -> PedidoDeRedefinicao:
+        model = self._session.get(PedidoRedefinicaoModel, pedido.id)
+        if model is None:
+            raise NotFoundError("Pedido nao encontrado.")
+        model.atendido = pedido.atendido
+        model.atendido_por = pedido.atendido_por
+        model.atendido_em = pedido.atendido_em
+        self._session.flush()
+        return _to_pedido(model)
+
+
+def _to_convite(model: ConviteModel) -> Convite:
+    return Convite(
+        email=Email(model.email),
+        tipo=TipoDeConvite(model.tipo),
+        token_hash=model.token_hash,
+        expira_em=_aware(model.expira_em),
+        criado_por=model.criado_por,
+        nome_sugerido=model.nome_sugerido,
+        papeis=list(model.papeis or []),
+        estado=EstadoDoConvite(model.estado),
+        usado_em=_aware(model.usado_em),
+        criado_em=_aware(model.criado_em),
+        id=model.id,
+    )
+
+
+def _to_pedido(model: PedidoRedefinicaoModel) -> PedidoDeRedefinicao:
+    return PedidoDeRedefinicao(
+        email=Email(model.email),
+        motivo=model.motivo,
+        ip_address=model.ip_address,
+        atendido=model.atendido,
+        atendido_por=model.atendido_por,
+        atendido_em=_aware(model.atendido_em),
+        criado_em=_aware(model.criado_em),
         id=model.id,
     )

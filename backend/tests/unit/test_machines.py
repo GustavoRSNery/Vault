@@ -288,10 +288,13 @@ class TestComparacaoEmTempoConstante:
         from app.domain.machines import entities
         from app.domain.vaults import quorum
 
+        from app.domain.onboarding import entities as onboarding
+
         alvos = [
             (entities.SecretId.matches, "SecretId.matches"),
             (entities.Lease.matches, "Lease.matches"),
             (quorum.SeloComQuorum.confere, "SeloComQuorum.confere"),
+            (onboarding.Convite.confere, "Convite.confere"),
         ]
         for funcao, nome in alvos:
             fonte = inspect.getsource(funcao)
