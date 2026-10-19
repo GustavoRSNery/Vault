@@ -57,6 +57,13 @@ class AuditAction(StrEnum):
     USER_DEACTIVATED = "usuario_desativado"
     USER_MFA_RESET = "usuario_mfa_reiniciado"
     USER_ROLES_CHANGED = "usuario_papeis_alterados"
+    DEVICE_CREATED = "dispositivo_cadastrado"
+    CREDENTIAL_CREATED = "credencial_cadastrada"
+    CREDENTIAL_CHECKED_OUT = "credencial_retirada"
+    CREDENTIAL_CHECKED_IN = "credencial_devolvida"
+    CREDENTIAL_CHECKOUT_DENIED = "credencial_retirada_negada"
+    CREDENTIAL_ROTATED = "credencial_rotacionada"
+    CERTIFICATE_CREATED = "certificado_cadastrado"
 
 
 class AuditOutcome(StrEnum):

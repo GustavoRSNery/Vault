@@ -7,7 +7,10 @@ costura fica num lugar só.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...domain.access.policy import Capability, Effect, Policy, PolicyRule
@@ -17,6 +20,14 @@ from ...domain.audit.events import (
     AuditEvent,
     AuditOutcome,
     ChainAnchor,
+)
+from ...domain.inventory.entities import (
+    Certificate,
+    Checkout,
+    Credential,
+    CredentialStatus,
+    Device,
+    DeviceKind,
 )
 from ...domain.shared.errors import ConflictError, NotFoundError
 from ...domain.shared.value_objects import PolicyPath, Slug
@@ -31,6 +42,10 @@ from ...domain.vaults.entities import (
 from .models import (
     AuditAnchorModel,
     AuditEventModel,
+    CertificateModel,
+    CheckoutModel,
+    CredentialModel,
+    DeviceModel,
     PolicyModel,
     PolicyRuleModel,
     RoleModel,
@@ -474,5 +489,279 @@ def _to_audit_event(model: AuditEventModel) -> AuditEvent:
         occurred_at=model.occurred_at,
         sequence=model.sequence,
         previous_hash=model.previous_hash,
+        id=model.id,
+    )
+
+
+class DeviceRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, device: Device) -> Device:
+        existente = self._session.scalar(
+            select(DeviceModel).where(DeviceModel.name == str(device.name))
+        )
+        if existente is not None:
+            raise ConflictError(f"Ja existe um dispositivo chamado {device.name}.")
+        self._session.add(
+            DeviceModel(
+                id=device.id,
+                name=str(device.name),
+                display_name=device.display_name,
+                kind=str(device.kind),
+                address=device.address,
+                tags=device.tags,
+                description=device.description,
+                is_active=device.is_active,
+                created_at=device.created_at,
+            )
+        )
+        self._session.flush()
+        return device
+
+    def get_by_name(self, name: Slug) -> Device:
+        model = self._session.scalar(
+            select(DeviceModel).where(DeviceModel.name == str(name))
+        )
+        if model is None:
+            raise NotFoundError(f"Dispositivo {name} nao encontrado.")
+        return _to_device(model)
+
+    def list_all(self, *, include_inactive: bool = True) -> list[Device]:
+        consulta = select(DeviceModel).order_by(DeviceModel.display_name)
+        if not include_inactive:
+            consulta = consulta.where(DeviceModel.is_active.is_(True))
+        return [_to_device(m) for m in self._session.scalars(consulta).all()]
+
+    def set_active(self, device_id: str, active: bool) -> Device:
+        model = self._session.get(DeviceModel, device_id)
+        if model is None:
+            raise NotFoundError("Dispositivo nao encontrado.")
+        model.is_active = active
+        self._session.flush()
+        return _to_device(model)
+
+
+class CredentialRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, credential: Credential) -> Credential:
+        self._session.add(
+            CredentialModel(
+                id=credential.id,
+                name=str(credential.name),
+                device_id=credential.device_id,
+                secret_id=credential.secret_id,
+                username=credential.username,
+                description=credential.description,
+                rotation_days=credential.rotation_days,
+                last_rotated_at=credential.last_rotated_at,
+                status=str(credential.status),
+                created_at=credential.created_at,
+            )
+        )
+        try:
+            self._session.flush()
+        except IntegrityError as erro:
+            self._session.rollback()
+            raise ConflictError(
+                f"O dispositivo ja tem uma credencial chamada {credential.name}."
+            ) from erro
+        return credential
+
+    def get(self, credential_id: str) -> Credential:
+        model = self._session.get(CredentialModel, credential_id)
+        if model is None:
+            raise NotFoundError("Credencial nao encontrada.")
+        return _to_credential(model)
+
+    def list_all(self) -> list[Credential]:
+        models = self._session.scalars(
+            select(CredentialModel).order_by(CredentialModel.name)
+        ).all()
+        return [_to_credential(m) for m in models]
+
+    def list_for_device(self, device_id: str) -> list[Credential]:
+        models = self._session.scalars(
+            select(CredentialModel)
+            .where(CredentialModel.device_id == device_id)
+            .order_by(CredentialModel.name)
+        ).all()
+        return [_to_credential(m) for m in models]
+
+    def save(self, credential: Credential) -> Credential:
+        """Grava o estado da credencial e as retiradas que ainda nao existem.
+
+        Retirada e fato consumado: nunca se reescreve uma existente, so se
+        acrescenta a nova e se fecha a aberta com a data de devolucao.
+        """
+        model = self._session.get(CredentialModel, credential.id)
+        if model is None:
+            raise NotFoundError("Credencial nao encontrada.")
+
+        model.username = credential.username
+        model.description = credential.description
+        model.rotation_days = credential.rotation_days
+        model.last_rotated_at = credential.last_rotated_at
+        model.status = str(credential.status)
+        model.secret_id = credential.secret_id
+
+        existentes = {c.id: c for c in model.checkouts}
+        for checkout in credential.checkouts:
+            atual = existentes.get(checkout.id)
+            if atual is None:
+                model.checkouts.append(
+                    CheckoutModel(
+                        id=checkout.id,
+                        credential_id=credential.id,
+                        user_id=checkout.user_id,
+                        user_label=checkout.user_label,
+                        reason=checkout.reason,
+                        due_at=checkout.due_at,
+                        taken_at=checkout.taken_at,
+                        returned_at=checkout.returned_at,
+                    )
+                )
+            elif atual.returned_at is None and checkout.returned_at is not None:
+                atual.returned_at = checkout.returned_at
+
+        try:
+            self._session.flush()
+        except IntegrityError as erro:
+            self._session.rollback()
+            # O indice parcial pegou uma segunda retirada aberta: duas
+            # requisicoes concorrentes tentaram retirar a mesma credencial.
+            raise ConflictError(
+                "A credencial acabou de ser retirada por outra pessoa."
+            ) from erro
+        return _to_credential(model)
+
+
+class CertificateRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, certificate: Certificate) -> Certificate:
+        existente = self._session.scalar(
+            select(CertificateModel).where(
+                CertificateModel.name == str(certificate.name)
+            )
+        )
+        if existente is not None:
+            raise ConflictError(
+                f"Ja existe um certificado chamado {certificate.name}."
+            )
+        self._session.add(
+            CertificateModel(
+                id=certificate.id,
+                name=str(certificate.name),
+                display_name=certificate.display_name,
+                subject=certificate.subject,
+                issuer=certificate.issuer,
+                serial=certificate.serial,
+                owner_label=certificate.owner_label,
+                not_before=certificate.not_before,
+                not_after=certificate.not_after,
+                secret_id=certificate.secret_id,
+                description=certificate.description,
+                created_at=certificate.created_at,
+            )
+        )
+        self._session.flush()
+        return certificate
+
+    def get_by_name(self, name: Slug) -> Certificate:
+        model = self._session.scalar(
+            select(CertificateModel).where(CertificateModel.name == str(name))
+        )
+        if model is None:
+            raise NotFoundError(f"Certificado {name} nao encontrado.")
+        return _to_certificate(model)
+
+    def list_all(self) -> list[Certificate]:
+        """Ordena por vencimento: o que vence primeiro aparece primeiro."""
+        models = self._session.scalars(
+            select(CertificateModel).order_by(CertificateModel.not_after)
+        ).all()
+        return [_to_certificate(m) for m in models]
+
+    def delete(self, certificate_id: str) -> None:
+        model = self._session.get(CertificateModel, certificate_id)
+        if model is None:
+            raise NotFoundError("Certificado nao encontrado.")
+        self._session.delete(model)
+        self._session.flush()
+
+
+def _aware(momento: datetime | None) -> datetime | None:
+    """Garante timezone na saida do banco.
+
+    O SQLite devolve datetime ingenuo mesmo em coluna DateTime(timezone=True),
+    e o Postgres devolve com offset. O dominio recusa datetime ingenuo, entao a
+    conversao mora aqui, na fronteira — e nao em cada entidade. Sem isto, a
+    mesma leitura funciona num dialeto e levanta TypeError no outro, que e a
+    classe de bug que ja apareceu no hash da auditoria.
+    """
+    if momento is None:
+        return None
+    return momento if momento.tzinfo is not None else momento.replace(tzinfo=UTC)
+
+
+def _to_device(model: DeviceModel) -> Device:
+    return Device(
+        name=Slug(model.name),
+        display_name=model.display_name,
+        kind=DeviceKind(model.kind),
+        address=model.address,
+        tags=list(model.tags or []),
+        description=model.description,
+        is_active=model.is_active,
+        created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+def _to_credential(model: CredentialModel) -> Credential:
+    return Credential(
+        name=Slug(model.name),
+        device_id=model.device_id,
+        secret_id=model.secret_id,
+        username=model.username,
+        description=model.description,
+        rotation_days=model.rotation_days,
+        last_rotated_at=_aware(model.last_rotated_at),
+        status=CredentialStatus(model.status),
+        checkouts=[
+            Checkout(
+                credential_id=c.credential_id,
+                user_id=c.user_id,
+                user_label=c.user_label,
+                reason=c.reason,
+                due_at=_aware(c.due_at),
+                taken_at=_aware(c.taken_at),
+                returned_at=_aware(c.returned_at),
+                id=c.id,
+            )
+            for c in sorted(model.checkouts, key=lambda c: _aware(c.taken_at))
+        ],
+        created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+def _to_certificate(model: CertificateModel) -> Certificate:
+    return Certificate(
+        name=Slug(model.name),
+        display_name=model.display_name,
+        subject=model.subject,
+        issuer=model.issuer,
+        not_before=_aware(model.not_before),
+        not_after=_aware(model.not_after),
+        owner_label=model.owner_label,
+        serial=model.serial,
+        secret_id=model.secret_id,
+        description=model.description,
+        created_at=_aware(model.created_at),
         id=model.id,
     )

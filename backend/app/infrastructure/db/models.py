@@ -22,6 +22,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -229,4 +230,131 @@ class AuditAnchorModel(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     exported_to: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = _now_column()
+
+
+class DeviceModel(Base):
+    """Dispositivo do inventário: servidor, roteador, banco, aplicação."""
+
+    __tablename__ = "dispositivos"
+
+    id: Mapped[str] = _id_column()
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="outro")
+    address: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = _now_column()
+
+    credentials: Mapped[list[CredentialModel]] = relationship(
+        back_populates="device", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class CredentialModel(Base):
+    """Credencial de um dispositivo, com prazo de rotação e custódia.
+
+    O valor não mora aqui: `secret_id` aponta para o segredo cifrado no cofre.
+    Esta tabela guarda o governo da credencial, não a credencial.
+    """
+
+    __tablename__ = "credenciais"
+
+    id: Mapped[str] = _id_column()
+    name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(
+        ForeignKey("dispositivos.id", ondelete="CASCADE"), nullable=False
+    )
+    # SET NULL e não CASCADE: excluir o segredo não deve apagar o histórico de
+    # rotação e custódia da credencial — é justamente o que a auditoria quer.
+    secret_id: Mapped[str | None] = mapped_column(
+        ForeignKey("segredos.id", ondelete="SET NULL"), nullable=True
+    )
+    username: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    rotation_days: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    last_rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="ativa", nullable=False)
+    created_at: Mapped[datetime] = _now_column()
+
+    device: Mapped[DeviceModel] = relationship(back_populates="credentials")
+    checkouts: Mapped[list[CheckoutModel]] = relationship(
+        back_populates="credential", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    __table_args__ = (
+        # Nome único por dispositivo, não global: "senha-root" existe em vários.
+        UniqueConstraint("device_id", "name", name="uq_credencial_por_dispositivo"),
+    )
+
+
+class CheckoutModel(Base):
+    """Retirada de credencial para uso exclusivo.
+
+    A exclusividade é regra de domínio, mas o índice parcial abaixo a apoia no
+    banco: sem ele, duas requisições concorrentes abririam duas retiradas e o
+    domínio só perceberia na leitura seguinte.
+    """
+
+    __tablename__ = "credenciais_custodias"
+
+    id: Mapped[str] = _id_column()
+    credential_id: Mapped[str] = mapped_column(
+        ForeignKey("credenciais.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=False
+    )
+    user_label: Mapped[str] = mapped_column(String(254), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    taken_at: Mapped[datetime] = _now_column()
+    returned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    credential: Mapped[CredentialModel] = relationship(back_populates="checkouts")
+
+    __table_args__ = (
+        Index("ix_custodia_credencial", "credential_id"),
+        # Uma única retirada aberta por credencial. O índice é parcial: as
+        # devolvidas (returned_at preenchido) ficam fora da restrição.
+        Index(
+            "uq_custodia_aberta",
+            "credential_id",
+            unique=True,
+            sqlite_where=text("returned_at IS NULL"),
+            postgresql_where=text("returned_at IS NULL"),
+        ),
+    )
+
+
+class CertificateModel(Base):
+    """Certificado digital: metadados e validade.
+
+    A chave privada, quando guardada, é segredo cifrado no cofre. Aqui ela
+    ficaria legível para quem só precisa acompanhar vencimento.
+    """
+
+    __tablename__ = "certificados"
+
+    id: Mapped[str] = _id_column()
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    subject: Mapped[str] = mapped_column(String(300), nullable=False)
+    issuer: Mapped[str] = mapped_column(String(300), nullable=False)
+    serial: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    owner_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    not_before: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    not_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    secret_id: Mapped[str | None] = mapped_column(
+        ForeignKey("segredos.id", ondelete="SET NULL"), nullable=True
+    )
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = _now_column()
