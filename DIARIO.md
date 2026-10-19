@@ -6,6 +6,44 @@ código já conta o quê.
 
 ---
 
+## 2026-10-19 — Quórum Shamir para desselar
+
+**Decidi:** os quinhões protegem um **token de desselagem**, não a chave-mestra.
+**Porque:** partir a KEK seria o óbvio e é errado — no KMS ela não existe neste
+processo para ser partida, e com chave local toda rotação invalidaria os
+quinhões já distribuídos (as pessoas receberiam envelopes novos a cada
+rotação). Com token independente, selar e rotacionar não se atrapalham.
+**Descartei:** partir a KEK; e também guardar o token (só o hash vai ao banco,
+senão quem lê o banco abre o cofre).
+
+**Decidi também:** manter `/desselar` simples ao lado do com quórum, mas fazer
+a rota simples **recusar** cofre com selo ativo.
+**Porque:** forçar quórum em todo cofre inviabilizaria selagem de emergência.
+Mas deixar a rota simples abrir tornaria o quórum contornável por quem tem
+ADMIN — exatamente quem ele existe para conter.
+**Reversível:** se quiser quórum obrigatório, é remover a rota simples.
+
+**Feito:** Shamir sobre GF(256) implementado do zero, entidade `SeloComQuorum`,
+3 rotas (`selar-com-quorum`, `desselar-com-quorum`, `selo`) e a cerimônia na
+tela de detalhe do cofre, com confirmação explícita antes de fechar os
+quinhões.
+
+**Validado:** 436 testes em SQLite e Postgres. GF(256) conferido contra
+implementação independente nos 65.536 pares. No ambiente real, 8 etapas:
+selar, cofre fecha (423), admin não contorna (403), quinhão repetido não
+soma, quinhões alheios não abrem, quórum correto abre, selo usado não reabre,
+e a trilha registra tudo.
+**Commit:** `c143ad3` Quórum Shamir para desselar cofre
+
+**Surpresa:** um mutante **sobreviveu** — a validação de limiar 1 só era
+exercitada via `selar_com_quorum`, onde o Shamir barra antes de o selo ser
+construído. A regra não estava morta; o teste é que nunca chegava nela. Agora
+a entidade é testada direto, o que importa porque o repositório a reconstrói
+ao ler do banco (um registro adulterado com limiar 1 voltaria como selo que
+não protege nada).
+
+---
+
 ## 2026-10-19 — KMS e rotação de chave-mestra
 
 **Decidi:** implementar o adaptador AWS KMS de verdade (boto3), com testes
@@ -132,9 +170,6 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
 
 ## Em aberto
 
-- [ ] **Quórum Shamir para desselar cofre** — hoje desselar é ação de um
-      administrador só. Partir a operação entre N pessoas é o que resta da
-      selagem. Não depende de nada externo.
 - [ ] **Destino inviolável de verdade** para a exportação — o arquivo local
       não é (quem tem o disco reescreve os dois lados). Precisa de Splunk HEC,
       CloudWatch ou bucket com Object Lock. **BLOQUEADO:** exige serviço
