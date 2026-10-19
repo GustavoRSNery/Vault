@@ -48,16 +48,24 @@ permissão ampla no cofre.
 docker compose up -d --build
 ```
 
-Pronto: **http://vault.localhost**. O banco é criado, o administrador e os
-dados de demonstração entram sozinhos, e os passos são idempotentes — subir de
-novo não duplica nada.
+Pronto: **http://vault.local**. O banco é criado, o administrador e os dados
+de demonstração entram sozinhos, e os passos são idempotentes — subir de novo
+não duplica nada.
 
-`*.localhost` resolve para 127.0.0.1 em qualquer navegador e no Windows, sem
-precisar editar o arquivo `hosts`.
+`vault.local` exige uma linha no arquivo `hosts` (PowerShell **como
+administrador**):
+
+```powershell
+Add-Content C:\Windows\System32\drivers\etc\hosts "127.0.0.1 vault.local"
+```
+
+Sem isso, **http://vault.localhost** atende ao mesmo lugar e resolve sozinho
+em qualquer máquina — é o que mantém `docker compose up` suficiente numa
+instalação nova.
 
 | Serviço | Endereço | O que é |
 | --- | --- | --- |
-| web | http://vault.localhost | a aplicação (nginx servindo o build + proxy da API) |
+| web | http://vault.local (ou http://vault.localhost) | a aplicação (nginx servindo o build + proxy da API) |
 | api | http://localhost:8777/docs | a API e sua documentação interativa |
 | db | localhost:55432 | Postgres (porta alta para não colidir com outro na máquina) |
 

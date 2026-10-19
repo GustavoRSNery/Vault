@@ -38,7 +38,7 @@ services:
       # gerenciador de segredos — nunca de um arquivo versionado como este.
       VAULT_MASTER_KEY_B64: ${VAULT_MASTER_KEY_B64:-bG9jYWxkZXZrZXkwMTIzNDU2Nzg5YWJjZGVmZ2hpams=}
       VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:-segredo-local-de-desenvolvimento-com-mais-de-32-bytes}
-      VAULT_CORS_ORIGINS: '["http://vault.localhost","http://localhost:8080"]'
+      VAULT_CORS_ORIGINS: '["http://vault.local","http://vault.localhost","http://localhost:8080"]'
     depends_on:
       db:
         condition: service_healthy
@@ -58,9 +58,14 @@ services:
     depends_on:
       api:
         condition: service_started
-    # Porta 80 para o endereco ficar sem numero: http://vault.localhost
-    # O Windows e os navegadores resolvem *.localhost para 127.0.0.1 sem
-    # precisar de entrada no arquivo hosts. A 8080 segue como alternativa.
+    # Porta 80 para o endereco ficar sem numero: http://vault.local
+    #
+    # Tres nomes atendem ao mesmo lugar, de proposito:
+    #   vault.local      nome do sistema; exige a linha no arquivo hosts
+    #   vault.localhost  resolve sozinho em qualquer maquina, sem configurar
+    #   localhost:8080   atalho de quem nao quer nome nenhum
+    # O segundo e o que mantem `docker compose up` suficiente numa maquina
+    # nova, sem pedir alteracao em arquivo de sistema.
     ports:
       - "80:80"
       - "8080:80"
