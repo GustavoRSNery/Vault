@@ -62,6 +62,10 @@ def main() -> None:
             # gerencia robos nao precisa, por isso, administrar pessoas.
             PolicyRuleModel(path="aplicacoes", capabilities=TODAS, effect="allow"),
             PolicyRuleModel(path="aplicacoes/*", capabilities=TODAS, effect="allow"),
+            # Revisar sessoes gravadas. Caminho proprio: uma gravacao mostra o
+            # que a pessoa digitou em producao, e quem administra cofres nao
+            # precisa, por isso, assistir ao trabalho dos colegas.
+            PolicyRuleModel(path="sessoes", capabilities=TODAS, effect="allow"),
         ]
         session.add(politica)
         session.flush()

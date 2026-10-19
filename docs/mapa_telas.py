@@ -62,9 +62,9 @@ ESTADO = {
     "Detalhe/upload": ("EMBUTIDA", "formulário em /certificados"),
     "Expirações": ("EMBUTIDA", "faixas acumuladas em /certificados + /alertas"),
     # Sessoes (fase 3)
-    "Sessões ativas": ("ABERTA", "fase 3 — gravação de sessão"),
-    "Gravações": ("ABERTA", "fase 3"),
-    "Player de sessão": ("ABERTA", "fase 3"),
+    "Sessões ativas": ("PAGINA", "/sessoes"),
+    "Gravações": ("PAGINA", "/sessoes/gravacoes"),
+    "Player de sessão": ("PAGINA", "/sessoes/:id, com timeline e busca"),
     # Auditoria
     "Trilha de auditoria": ("PAGINA", "/auditoria"),
     "Detalhe do evento": ("EMBUTIDA", "linha da trilha"),

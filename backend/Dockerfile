@@ -21,11 +21,14 @@ RUN pip install --no-cache-dir \
 COPY app ./app
 
 # Usuário sem privilégios: um cofre de senhas não roda como root.
-# A pasta de exportações é criada e cedida ANTES do USER: montada como volume,
-# ela nasceria de root e o processo não conseguiria escrever a trilha.
+#
+# As pastas de volume são criadas e cedidas ANTES do USER. O Docker só herda
+# a propriedade quando o diretório já existe na imagem com o dono certo; se
+# o volume for montado sobre um caminho inexistente, ele nasce de root e o
+# processo não consegue escrever — foi o que aconteceu com /gravacoes.
 RUN useradd --create-home --uid 10001 vault \
-    && mkdir -p /exportacoes \
-    && chown -R vault:vault /app /exportacoes
+    && mkdir -p /exportacoes /gravacoes \
+    && chown -R vault:vault /app /exportacoes /gravacoes
 USER vault
 
 EXPOSE 8000

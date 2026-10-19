@@ -40,6 +40,10 @@ services:
       VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:-segredo-local-de-desenvolvimento-com-mais-de-32-bytes}
       VAULT_CORS_ORIGINS: '["http://vault.local","http://vault.localhost","http://localhost:8080"]'
       VAULT_AUDIT_EXPORT_PATH: /exportacoes/trilha.jsonl
+      # Gravacao de sessao. Trocar para proxy-ssh/s3 quando conectar.
+      VAULT_SESSAO_CAPTURA: manual
+      VAULT_SESSAO_ARMAZENAMENTO: local
+      VAULT_SESSAO_GRAVACOES_PATH: /gravacoes
     depends_on:
       db:
         condition: service_healthy
@@ -56,6 +60,9 @@ services:
     # container destruiria justamente a prova que ela existe para ser.
     volumes:
       - vault_exportacoes:/exportacoes
+      # Gravacao e prova: perde-la ao recriar o container destruiria
+      # justamente o que ela existe para ser.
+      - vault_gravacoes:/gravacoes
     restart: unless-stopped
 
   web:
@@ -80,3 +87,4 @@ services:
 volumes:
   vault_pgdata:
   vault_exportacoes:
+  vault_gravacoes:

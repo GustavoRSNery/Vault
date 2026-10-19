@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**49 das 57 telas** do inventário de arquitetura, **66 endpoints**, **527
+**52 das 57 telas** do inventário de arquitetura, **74 endpoints**, **577
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 
@@ -30,8 +30,9 @@ e conferidos no navegador.
 
 | **Acesso de máquina para RPAs** (AppRole, leases, consumo, **rotação pelo robô**) | — |
 
-Fora do escopo entregue: gravação de sessão e integrações (SES, WhatsApp,
-LDAP) são fase 3.
+| **Gravação de sessão** (ativas, histórico, player com timeline) | Captura automática por proxy — porta pronta, falta conectar |
+
+Fora do escopo entregue: integrações (SES, WhatsApp, LDAP) são fase 3.
 
 ### Ambiente de demonstração
 
@@ -302,6 +303,32 @@ se desarma na primeira pressa.
 Cada alteração registra o antes e o depois na trilha — "configuração
 alterada" não permitiria revisar nada, e mudança silenciosa de prazo é
 exatamente o que uma auditoria procura.
+
+**Gravação de sessão, em ports and adapters.** A trilha diz quem revelou
+qual segredo; a gravação diz o que a pessoa fez com ele depois. Numa
+investigação, é a diferença entre saber que alguém pegou a senha do banco às
+3h e saber que comando rodou lá dentro.
+
+São **duas portas**, separadas porque têm tecnologias diferentes:
+`CapturaDeSessao` (de onde os eventos vêm) e `ArmazenamentoDeGravacao` (onde
+a gravação fica). Juntá-las forçaria quem troca o armazenamento a mexer na
+captura.
+
+O que funciona hoje: captura **manual** (a pessoa registra o que fez) e
+armazenamento em arquivo. Os dois **declaram o que são** —
+`captura_automatica: false` e `imutavel: false` — e a tela usa isso para não
+anunciar "gravação completa" onde há anotação, nem "prova" onde há registro.
+
+O que falta conectar: `ProxySsh` precisa de um servidor SSH intermediário;
+`ArmazenamentoS3` precisa de bucket com Object Lock. Ambos estão esboçados
+com a interface pronta e o corpo levantando `NotImplementedError` — um stub
+que devolvesse vazio em silêncio viraria "a gravação está ligada" numa
+auditoria, e descobrir que não estava é a pior hora para descobrir.
+
+**Ninguém escreve na gravação alheia**, nem o administrador: seria a forma
+mais simples de forjar um registro. E **abrir a gravação de outra pessoa vira
+evento de auditoria** — quem revisa também é revisado, senão a tela seria uma
+janela para a atividade dos colegas sem rastro nenhum.
 
 ## Limites conhecidos da auditoria
 

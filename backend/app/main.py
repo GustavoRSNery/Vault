@@ -15,6 +15,7 @@ from .api.v1 import (
     machines,
     mfa,
     search,
+    sessions,
     settings as settings_router,
     vaults,
 )
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(search.router, prefix="/api/v1")
     app.include_router(machines.router, prefix="/api/v1")
     app.include_router(settings_router.router, prefix="/api/v1")
+    app.include_router(sessions.router, prefix="/api/v1")
 
     @app.get("/saude", tags=["Infraestrutura"], summary="Verificação de saúde")
     def saude() -> dict[str, str]:

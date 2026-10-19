@@ -36,6 +36,13 @@ from ...domain.inventory.entities import (
     Device,
     DeviceKind,
 )
+from ...domain.sessions.entities import (
+    EstadoDaSessao,
+    EventoDeSessao,
+    Sessao,
+    TipoDeEvento,
+    TipoDeSessao,
+)
 from ...domain.settings.entities import ConfiguracaoOperacional
 from ...domain.shared.errors import ConflictError, NotFoundError
 from ...domain.vaults.quorum import SeloComQuorum
@@ -63,8 +70,10 @@ from .models import (
     PolicyRuleModel,
     RoleModel,
     SecretModel,
+    EventoSessaoModel,
     SecretIdModel,
     SecretVersionModel,
+    SessaoModel,
     UserModel,
     VaultModel,
     VaultSealModel,
@@ -1310,5 +1319,180 @@ def _to_configuracao(model: ConfiguracaoModel) -> ConfiguracaoOperacional:
         trilha_limite_padrao=model.trilha_limite_padrao,
         atualizado_por=model.atualizado_por,
         atualizado_em=_aware(model.atualizado_em),
+        id=model.id,
+    )
+
+
+class SessaoRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, sessao: Sessao, capturado_por: str, automatica: bool) -> Sessao:
+        self._session.add(
+            SessaoModel(
+                id=sessao.id,
+                usuario_id=sessao.usuario_id,
+                usuario_label=sessao.usuario_label,
+                tipo=str(sessao.tipo),
+                alvo=sessao.alvo,
+                motivo=sessao.motivo,
+                segredo_path=sessao.segredo_path,
+                estado=str(sessao.estado),
+                capturado_por=capturado_por,
+                captura_automatica=automatica,
+                ip_address=sessao.ip_address,
+                iniciada_em=sessao.iniciada_em,
+                ultima_atividade_em=sessao.ultima_atividade_em,
+            )
+        )
+        self._session.flush()
+        return sessao
+
+    def get(self, sessao_id: str) -> Sessao:
+        model = self._session.get(SessaoModel, sessao_id)
+        if model is None:
+            raise NotFoundError("Sessao nao encontrada.")
+        return _to_sessao(model)
+
+    def ativas(self) -> list[Sessao]:
+        models = self._session.scalars(
+            select(SessaoModel)
+            .where(SessaoModel.estado == "ativa")
+            .order_by(SessaoModel.iniciada_em.desc())
+        ).all()
+        return [_to_sessao(m) for m in models]
+
+    def ativas_do_usuario(self, usuario_id: str) -> list[Sessao]:
+        models = self._session.scalars(
+            select(SessaoModel).where(
+                SessaoModel.usuario_id == usuario_id,
+                SessaoModel.estado == "ativa",
+            )
+        ).all()
+        return [_to_sessao(m) for m in models]
+
+    def historico(
+        self,
+        *,
+        termo: str | None = None,
+        usuario_label: str | None = None,
+        limite: int = 100,
+    ) -> list[Sessao]:
+        """Sessoes encerradas, filtradas.
+
+        O filtro por termo casa no ALVO e no MOTIVO, nao no conteudo dos
+        eventos: buscar dentro da gravacao e operacao de outra natureza (uma
+        sessao tem milhares de eventos) e vive em `buscar_em`.
+        """
+        consulta = select(SessaoModel).where(SessaoModel.estado != "ativa")
+        if termo:
+            alvo = f"%{termo.strip().lower()}%"
+            consulta = consulta.where(
+                func.lower(SessaoModel.alvo).like(alvo)
+                | func.lower(SessaoModel.motivo).like(alvo)
+            )
+        if usuario_label:
+            consulta = consulta.where(SessaoModel.usuario_label == usuario_label)
+        consulta = consulta.order_by(SessaoModel.iniciada_em.desc()).limit(limite)
+        return [_to_sessao(m) for m in self._session.scalars(consulta).all()]
+
+    def buscar_em(self, sessao_id: str, termo: str) -> list[EventoDeSessao]:
+        """Procura dentro da gravacao de UMA sessao.
+
+        Separado do historico de proposito: aqui a consulta varre eventos, e
+        fazer isso para todas as sessoes de uma vez seria varredura completa
+        da maior tabela do sistema.
+        """
+        alvo = termo.strip().lower()
+        if not alvo:
+            return []
+        models = self._session.scalars(
+            select(EventoSessaoModel)
+            .where(
+                EventoSessaoModel.sessao_id == sessao_id,
+                func.lower(EventoSessaoModel.conteudo).like(f"%{alvo}%"),
+            )
+            .order_by(EventoSessaoModel.deslocamento_ms)
+        ).all()
+        return [_to_evento_sessao(m) for m in models]
+
+    def registrar_evento(self, sessao_id: str, evento: EventoDeSessao) -> None:
+        self._session.add(
+            EventoSessaoModel(
+                id=evento.id,
+                sessao_id=sessao_id,
+                deslocamento_ms=evento.deslocamento_ms,
+                tipo=str(evento.tipo),
+                conteudo=evento.conteudo,
+            )
+        )
+        model = self._session.get(SessaoModel, sessao_id)
+        if model is not None:
+            model.ultima_atividade_em = utcnow()
+        self._session.flush()
+
+    def save_estado(
+        self, sessao: Sessao, *, gravacao_ref: str | None = None,
+        gravacao_destino: str = "",
+    ) -> Sessao:
+        model = self._session.get(SessaoModel, sessao.id)
+        if model is None:
+            raise NotFoundError("Sessao nao encontrada.")
+        model.estado = str(sessao.estado)
+        model.encerrada_em = sessao.encerrada_em
+        model.encerrada_por = sessao.encerrada_por
+        model.motivo_encerramento = sessao.motivo_encerramento
+        model.ultima_atividade_em = sessao.ultima_atividade_em
+        if gravacao_ref is not None:
+            model.gravacao_ref = gravacao_ref
+            model.gravacao_destino = gravacao_destino
+        self._session.flush()
+        return _to_sessao(model)
+
+    def metadados(self, sessao_id: str) -> tuple[str, bool, str | None, str]:
+        """(capturado_por, automatica, gravacao_ref, destino) — sem os eventos.
+
+        A tela de historico precisa disto para cada linha; carregar os eventos
+        junto faria a listagem puxar a gravacao inteira de cada sessao.
+        """
+        model = self._session.get(SessaoModel, sessao_id)
+        if model is None:
+            raise NotFoundError("Sessao nao encontrada.")
+        return (
+            model.capturado_por,
+            model.captura_automatica,
+            model.gravacao_ref,
+            model.gravacao_destino,
+        )
+
+
+def _to_evento_sessao(model: EventoSessaoModel) -> EventoDeSessao:
+    return EventoDeSessao(
+        deslocamento_ms=model.deslocamento_ms,
+        tipo=TipoDeEvento(model.tipo),
+        conteudo=model.conteudo,
+        id=model.id,
+    )
+
+
+def _to_sessao(model: SessaoModel) -> Sessao:
+    return Sessao(
+        usuario_id=model.usuario_id,
+        usuario_label=model.usuario_label,
+        tipo=TipoDeSessao(model.tipo),
+        alvo=model.alvo,
+        motivo=model.motivo,
+        segredo_path=model.segredo_path,
+        estado=EstadoDaSessao(model.estado),
+        eventos=[
+            _to_evento_sessao(e)
+            for e in sorted(model.eventos, key=lambda e: e.deslocamento_ms)
+        ],
+        ip_address=model.ip_address,
+        iniciada_em=_aware(model.iniciada_em),
+        ultima_atividade_em=_aware(model.ultima_atividade_em),
+        encerrada_em=_aware(model.encerrada_em),
+        encerrada_por=model.encerrada_por,
+        motivo_encerramento=model.motivo_encerramento,
         id=model.id,
     )

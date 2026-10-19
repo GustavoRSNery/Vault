@@ -18,9 +18,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..application.access.login import Login
 from ..config import Settings, get_settings
 from ..domain.shared.errors import AuthenticationError
+from ..application.ports.sessions import (
+    ArmazenamentoDeGravacao,
+    CapturaDeSessao,
+)
 from ..application.ports.siem import SiemExporter
 from ..infrastructure.audit.exporters import JsonlExporter
 from ..infrastructure.auth.tokens import TokenService
+from ..infrastructure.sessions.adapters import (
+    ArmazenamentoLocal,
+    ArmazenamentoS3,
+    CapturaManual,
+    ProxySsh,
+)
 from ..infrastructure.auth.totp import TotpService
 from ..infrastructure.crypto.envelope import EnvelopeCryptoService, LocalKeyProvider
 from ..infrastructure.crypto.kms import KmsKeyProvider
@@ -30,6 +40,7 @@ from ..infrastructure.db.repositories import (
     AuditRepository,
     PolicyRepository,
     SecretRepository,
+    SessaoRepository,
     VaultRepository,
     VaultSealRepository,
 )
@@ -184,6 +195,36 @@ def get_seals(db: Annotated[Session, Depends(get_db)]) -> VaultSealRepository:
 
 def get_audit(db: Annotated[Session, Depends(get_db)]) -> AuditRepository:
     return AuditRepository(db)
+
+
+def get_captura(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> CapturaDeSessao:
+    """De onde os eventos de sessao vem.
+
+    Trocar o proxy SSH de producao e trocar esta linha: as rotas conhecem a
+    porta `CapturaDeSessao`, nunca a tecnologia.
+    """
+    if settings.sessao_captura == "proxy-ssh":
+        return ProxySsh(settings.sessao_proxy_host)
+    return CapturaManual()
+
+
+def get_gravacoes(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ArmazenamentoDeGravacao:
+    """Onde a gravacao fechada fica guardada.
+
+    O local nao e imutavel e diz isso; o S3 com Object Lock e, e tambem diz.
+    A interface usa a declaracao para nao anunciar prova onde ha so registro.
+    """
+    if settings.sessao_armazenamento == "s3":
+        return ArmazenamentoS3(settings.sessao_s3_bucket)
+    return ArmazenamentoLocal(settings.sessao_gravacoes_path)
+
+
+def get_sessoes(db: Annotated[Session, Depends(get_db)]) -> SessaoRepository:
+    return SessaoRepository(db)
 
 
 def get_siem_exporter(

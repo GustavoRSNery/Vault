@@ -76,6 +76,10 @@ class AuditAction(StrEnum):
     APPLICATION_LEASES_REVOKED = "aplicacao_leases_revogados"
     APPLICATION_CREDENTIAL_ROTATED = "aplicacao_credencial_rotacionada"
     SETTINGS_UPDATED = "configuracao_alterada"
+    SESSION_OPENED = "sessao_aberta"
+    SESSION_CLOSED = "sessao_encerrada"
+    SESSION_TERMINATED = "sessao_derrubada"
+    SESSION_REPLAYED = "sessao_reproduzida"
 
 
 class AuditOutcome(StrEnum):

@@ -558,3 +558,72 @@ class ConfiguracaoModel(Base):
     )
     atualizado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
     atualizado_em: Mapped[datetime] = _now_column()
+
+
+class SessaoModel(Base):
+    """Sessao privilegiada e sua gravacao.
+
+    Os eventos ficam em tabela propria, nao num JSON aqui: uma sessao de uma
+    hora tem milhares deles, e carregar tudo para listar as sessoes ativas
+    seria o tipo de consulta que derruba a tela no primeiro mes de uso real.
+    """
+
+    __tablename__ = "sessoes"
+
+    id: Mapped[str] = _id_column()
+    usuario_id: Mapped[str] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    usuario_label: Mapped[str] = mapped_column(String(254), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    alvo: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    motivo: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    segredo_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    estado: Mapped[str] = mapped_column(
+        String(20), default="ativa", nullable=False, index=True
+    )
+    # Como a gravacao foi feita. Uma sessao capturada por proxy e outra
+    # anotada a mao merecem confianca diferente numa investigacao.
+    capturado_por: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    captura_automatica: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    # Referencia no armazenamento externo, preenchida ao encerrar.
+    gravacao_ref: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    gravacao_destino: Mapped[str] = mapped_column(
+        String(100), default="", nullable=False
+    )
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    iniciada_em: Mapped[datetime] = _now_column()
+    ultima_atividade_em: Mapped[datetime] = _now_column()
+    encerrada_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    encerrada_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    motivo_encerramento: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+    eventos: Mapped[list[EventoSessaoModel]] = relationship(
+        back_populates="sessao", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class EventoSessaoModel(Base):
+    """Um instante da gravacao."""
+
+    __tablename__ = "sessoes_eventos"
+
+    id: Mapped[str] = _id_column()
+    sessao_id: Mapped[str] = mapped_column(
+        ForeignKey("sessoes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    deslocamento_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    conteudo: Mapped[str] = mapped_column(Text, nullable=False)
+
+    sessao: Mapped[SessaoModel] = relationship(back_populates="eventos")
+
+    __table_args__ = (
+        # A reproducao le em ordem; sem o indice, cada abertura de player
+        # faria uma ordenacao completa.
+        Index("ix_evento_sessao_ordem", "sessao_id", "deslocamento_ms"),
+    )

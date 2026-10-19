@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     # troca e de uma linha em deps.py, porque o caso de uso so conhece a porta.
     audit_export_path: str = "./exportacoes/trilha.jsonl"
 
+    # Gravacao de sessao. Trocar o adaptador e trocar estes valores — o
+    # dominio e as rotas nao conhecem nenhuma tecnologia de captura.
+    #   captura:     "manual" | "proxy-ssh"
+    #   armazenamento: "local" | "s3"
+    sessao_captura: str = "manual"
+    sessao_armazenamento: str = "local"
+    sessao_gravacoes_path: str = "./gravacoes"
+    sessao_proxy_host: str = ""
+    sessao_s3_bucket: str = ""
+
     @field_validator("master_key_b64")
     @classmethod
     def _validate_master_key(cls, value: str) -> str:

@@ -8,6 +8,9 @@ import { ConfiguracaoPage } from '@/features/admin/ConfiguracaoPage'
 import { PoliticasPage } from '@/features/admin/PoliticasPage'
 import { SolicitacoesPage } from '@/features/approvals/SolicitacoesPage'
 import { AplicacoesPage } from '@/features/machines/AplicacoesPage'
+import { GravacoesPage } from '@/features/sessions/GravacoesPage'
+import { PlayerPage } from '@/features/sessions/PlayerPage'
+import { SessoesPage } from '@/features/sessions/SessoesPage'
 import { AlertasPage } from '@/features/search/AlertasPage'
 import { BuscaPage } from '@/features/search/BuscaPage'
 import { NaoEncontrada } from './NaoEncontrada'
@@ -54,6 +57,9 @@ function Rotas() {
         <Route path="credenciais" element={<CredenciaisPage />} />
         <Route path="certificados" element={<CertificadosPage />} />
         <Route path="solicitacoes" element={<SolicitacoesPage />} />
+        <Route path="sessoes" element={<SessoesPage />} />
+        <Route path="sessoes/gravacoes" element={<GravacoesPage />} />
+        <Route path="sessoes/:id" element={<PlayerPage />} />
         <Route path="busca" element={<BuscaPage />} />
         <Route path="alertas" element={<AlertasPage />} />
         <Route path="perfil" element={<PerfilPage />} />
