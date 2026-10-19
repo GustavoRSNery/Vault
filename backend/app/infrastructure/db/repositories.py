@@ -22,6 +22,12 @@ from ...domain.audit.events import (
     ChainAnchor,
 )
 from ...domain.approvals.entities import AccessRequest, RequestStatus
+from ...domain.machines.entities import (
+    Application,
+    ApplicationStatus,
+    Lease,
+    SecretId,
+)
 from ...domain.inventory.entities import (
     Certificate,
     Checkout,
@@ -43,16 +49,19 @@ from ...domain.vaults.entities import (
 )
 from .models import (
     AccessRequestModel,
+    ApplicationModel,
     AuditAnchorModel,
     AuditEventModel,
     CertificateModel,
     CheckoutModel,
     CredentialModel,
     DeviceModel,
+    LeaseModel,
     PolicyModel,
     PolicyRuleModel,
     RoleModel,
     SecretModel,
+    SecretIdModel,
     SecretVersionModel,
     UserModel,
     VaultModel,
@@ -203,6 +212,20 @@ class PolicyRepository:
                 if policy_model.id not in seen:
                     seen[policy_model.id] = _to_policy(policy_model)
         return list(seen.values())
+
+    def policies_for_application(self, papel_id: str | None) -> list[Policy]:
+        """Politicas que alcancam uma aplicacao, pelo papel dela.
+
+        Mesmo caminho das pessoas (`policies_for_user`), para que o editor de
+        politicas valha para os dois. Sem papel, a aplicacao nao tem acesso
+        nenhum — default deny, como em todo o resto.
+        """
+        if papel_id is None:
+            return []
+        papel = self._session.get(RoleModel, papel_id)
+        if papel is None:
+            return []
+        return [_to_policy(p) for p in papel.policies]
 
     def list_all(self) -> list[Policy]:
         """Todas as politicas cadastradas, para a tela de administracao."""
@@ -938,5 +961,231 @@ def _to_selo(model: VaultSealModel) -> SeloComQuorum:
         portadores=list(model.portadores or []),
         selado_por=model.selado_por,
         selado_em=_aware(model.selado_em),
+        id=model.id,
+    )
+
+
+class ApplicationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, app: Application) -> Application:
+        existente = self._session.scalar(
+            select(ApplicationModel).where(ApplicationModel.name == str(app.name))
+        )
+        if existente is not None:
+            raise ConflictError(f"Ja existe uma aplicacao chamada {app.name}.")
+        self._session.add(
+            ApplicationModel(
+                id=app.id,
+                name=str(app.name),
+                display_name=app.display_name,
+                description=app.description,
+                owner_label=app.owner_label,
+                status=str(app.status),
+                lease_minutos=app.lease_minutos,
+                role_id=app.role_id,
+                application_role_id=app.papel_id,
+                created_at=app.created_at,
+            )
+        )
+        self._session.flush()
+        return app
+
+    def get_by_name(self, name: Slug) -> Application:
+        model = self._session.scalar(
+            select(ApplicationModel).where(ApplicationModel.name == str(name))
+        )
+        if model is None:
+            raise NotFoundError(f"Aplicacao {name} nao encontrada.")
+        return _to_application(model)
+
+    def get_by_role_id(self, role_id: str) -> Application | None:
+        """Devolve None em vez de levantar: quem autentica nao deve distinguir
+        role_id inexistente de credencial errada."""
+        model = self._session.scalar(
+            select(ApplicationModel).where(ApplicationModel.role_id == role_id)
+        )
+        return _to_application(model) if model is not None else None
+
+    def list_all(self) -> list[Application]:
+        models = self._session.scalars(
+            select(ApplicationModel).order_by(ApplicationModel.display_name)
+        ).all()
+        return [_to_application(m) for m in models]
+
+    def save(self, app: Application) -> Application:
+        model = self._session.get(ApplicationModel, app.id)
+        if model is None:
+            raise NotFoundError("Aplicacao nao encontrada.")
+        model.display_name = app.display_name
+        model.description = app.description
+        model.owner_label = app.owner_label
+        model.status = str(app.status)
+        model.lease_minutos = app.lease_minutos
+        model.application_role_id = app.papel_id
+        self._session.flush()
+        return _to_application(model)
+
+
+class SecretIdRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, secret_id: SecretId) -> SecretId:
+        self._session.add(
+            SecretIdModel(
+                id=secret_id.id,
+                application_id=secret_id.application_id,
+                secret_hash=secret_id.secret_hash,
+                label=secret_id.label,
+                created_by=secret_id.created_by,
+                expires_at=secret_id.expires_at,
+                created_at=secret_id.created_at,
+            )
+        )
+        self._session.flush()
+        return secret_id
+
+    def list_for_application(self, application_id: str) -> list[SecretId]:
+        models = self._session.scalars(
+            select(SecretIdModel)
+            .where(SecretIdModel.application_id == application_id)
+            .order_by(SecretIdModel.created_at.desc())
+        ).all()
+        return [_to_secret_id(m) for m in models]
+
+    def find_valid(self, application_id: str, apresentado: str) -> SecretId | None:
+        """Procura a credencial que casa com o valor apresentado.
+
+        Compara pelo hash, mas a busca percorre as credenciais da aplicacao:
+        indexar por hash e comparar diretamente seria mais rapido, porem
+        entregaria a comparacao ao banco, que nao faz tempo constante.
+        """
+        for secret_id in self.list_for_application(application_id):
+            if secret_id.is_valid() and secret_id.matches(apresentado):
+                return secret_id
+        return None
+
+    def save(self, secret_id: SecretId) -> SecretId:
+        model = self._session.get(SecretIdModel, secret_id.id)
+        if model is None:
+            raise NotFoundError("Credencial nao encontrada.")
+        model.revoked_at = secret_id.revoked_at
+        model.last_used_at = secret_id.last_used_at
+        model.usos = secret_id.usos
+        self._session.flush()
+        return _to_secret_id(model)
+
+
+class LeaseRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, lease: Lease) -> Lease:
+        self._session.add(
+            LeaseModel(
+                id=lease.id,
+                application_id=lease.application_id,
+                secret_id_usado=lease.secret_id_usado,
+                token_hash=lease.token_hash,
+                caminhos=list(lease.caminhos),
+                capacidades=[str(c) for c in lease.capacidades],
+                negados=list(lease.negados),
+                expires_at=lease.expires_at,
+                created_at=lease.created_at,
+            )
+        )
+        self._session.flush()
+        return lease
+
+    def find_by_token(self, token: str) -> Lease | None:
+        import hashlib
+
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        model = self._session.scalar(
+            select(LeaseModel).where(LeaseModel.token_hash == digest)
+        )
+        return _to_lease(model) if model is not None else None
+
+    def list_for_application(self, application_id: str) -> list[Lease]:
+        models = self._session.scalars(
+            select(LeaseModel)
+            .where(LeaseModel.application_id == application_id)
+            .order_by(LeaseModel.created_at.desc())
+        ).all()
+        return [_to_lease(m) for m in models]
+
+    def save(self, lease: Lease) -> Lease:
+        model = self._session.get(LeaseModel, lease.id)
+        if model is None:
+            raise NotFoundError("Lease nao encontrado.")
+        model.revoked_at = lease.revoked_at
+        model.leituras = lease.leituras
+        self._session.flush()
+        return _to_lease(model)
+
+    def revogar_todos(self, application_id: str) -> int:
+        """Revoga os leases ativos de uma aplicacao de uma vez.
+
+        E o botao de emergencia: suspeita de comprometimento do robo fecha
+        todos os acessos agora, sem esperar a expiracao natural.
+        """
+        agora = utcnow()
+        models = self._session.scalars(
+            select(LeaseModel).where(
+                LeaseModel.application_id == application_id,
+                LeaseModel.revoked_at.is_(None),
+                LeaseModel.expires_at > agora,
+            )
+        ).all()
+        for model in models:
+            model.revoked_at = agora
+        self._session.flush()
+        return len(models)
+
+
+def _to_application(model: ApplicationModel) -> Application:
+    return Application(
+        name=Slug(model.name),
+        display_name=model.display_name,
+        description=model.description,
+        owner_label=model.owner_label,
+        status=ApplicationStatus(model.status),
+        lease_minutos=model.lease_minutos,
+        role_id=model.role_id,
+        papel_id=model.application_role_id,
+        created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+def _to_secret_id(model: SecretIdModel) -> SecretId:
+    return SecretId(
+        application_id=model.application_id,
+        secret_hash=model.secret_hash,
+        label=model.label,
+        created_by=model.created_by,
+        expires_at=_aware(model.expires_at),
+        revoked_at=_aware(model.revoked_at),
+        last_used_at=_aware(model.last_used_at),
+        usos=model.usos,
+        created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+def _to_lease(model: LeaseModel) -> Lease:
+    return Lease(
+        application_id=model.application_id,
+        secret_id_usado=model.secret_id_usado,
+        token_hash=model.token_hash,
+        caminhos=list(model.caminhos or []),
+        capacidades=[Capability(c) for c in (model.capacidades or [])],
+        negados=list(model.negados or []),
+        expires_at=_aware(model.expires_at),
+        revoked_at=_aware(model.revoked_at),
+        leituras=model.leituras,
+        created_at=_aware(model.created_at),
         id=model.id,
     )

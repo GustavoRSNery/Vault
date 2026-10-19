@@ -17,7 +17,7 @@ from ..config import get_settings
 from ..infrastructure.db.models import PolicyModel, PolicyRuleModel
 
 TODAS = ["read", "reveal", "create", "update", "delete", "list", "approve", "admin"]
-CAMINHOS = ["admin", "admin/*"]
+CAMINHOS = ["admin", "admin/*", "aplicacoes", "aplicacoes/*"]
 
 
 def main() -> None:

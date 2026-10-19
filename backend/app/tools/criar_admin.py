@@ -58,6 +58,10 @@ def main() -> None:
             # por si, entregar o poder de reescrever quem acessa o que.
             PolicyRuleModel(path="admin", capabilities=TODAS, effect="allow"),
             PolicyRuleModel(path="admin/*", capabilities=TODAS, effect="allow"),
+            # Administracao de aplicacoes (RPAs). Caminho proprio: quem
+            # gerencia robos nao precisa, por isso, administrar pessoas.
+            PolicyRuleModel(path="aplicacoes", capabilities=TODAS, effect="allow"),
+            PolicyRuleModel(path="aplicacoes/*", capabilities=TODAS, effect="allow"),
         ]
         session.add(politica)
         session.flush()

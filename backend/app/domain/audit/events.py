@@ -69,6 +69,11 @@ class AuditAction(StrEnum):
     ACCESS_DENIED_REQUEST = "acesso_solicitacao_negada"
     ACCESS_REVOKED = "acesso_revogado"
     AUDIT_EXPORTED = "trilha_exportada"
+    APPLICATION_CREATED = "aplicacao_cadastrada"
+    APPLICATION_CREDENTIAL_ISSUED = "aplicacao_credencial_emitida"
+    APPLICATION_CREDENTIAL_REVOKED = "aplicacao_credencial_revogada"
+    APPLICATION_AUTHENTICATED = "aplicacao_autenticada"
+    APPLICATION_LEASES_REVOKED = "aplicacao_leases_revogados"
 
 
 class AuditOutcome(StrEnum):

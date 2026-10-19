@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**43 das 57 telas** do inventário de arquitetura, **52 endpoints**, **436
+**47 das 57 telas** do inventário de arquitetura, **61 endpoints**, **484
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 
@@ -28,8 +28,9 @@ e conferidos no navegador.
 | Trilha de auditoria encadeada, **exportada e ancorada** | Destino inviolável de verdade (hoje é arquivo local) |
 | Selar e desselar cofre, **com quórum Shamir** | — |
 
-Fora do escopo entregue, por fase: acesso de máquina para RPAs (AppRole,
-leases, consumo) é fase 2; gravação de sessão e integrações (SES, WhatsApp,
+| **Acesso de máquina para RPAs** (AppRole, leases, consumo) | Rotação automática do secret_id |
+
+Fora do escopo entregue: gravação de sessão e integrações (SES, WhatsApp,
 LDAP) são fase 3.
 
 ### Ambiente de demonstração
@@ -267,6 +268,26 @@ não um defeito, e a tela avisa antes.
 A rota de desselagem simples **recusa** um cofre com quórum ativo — deixar
 passar tornaria o mecanismo contornável por quem já tem `ADMIN`, ou seja, por
 exatamente quem ele existe para conter.
+
+**Acesso de máquina sem senha eterna.** Um RPA precisa ler segredos às 3 da
+manhã, sem ninguém para digitar senha. A saída ruim é embutir credencial no
+código — que vaza no repositório, fica no histórico do git e nunca é
+rotacionada porque ninguém lembra que está lá.
+
+AppRole separa `role_id` (identifica, público, pode ir no código) de
+`secret_id` (autentica, segredo, revogável). Trocar a credencial não exige
+alterar o robô, e um `role_id` vazado sozinho não autentica nada.
+
+A autenticação devolve um **lease** curto, com escopo **congelado** no momento
+da emissão: ampliar a política depois não amplia um lease já emitido, senão um
+robô autenticado escalaria privilégio sem reautenticar. O teto é 12h — além
+disso deixa de ser empréstimo.
+
+A aplicação recebe política pelo mesmo mecanismo das pessoas (via papel), para
+que o editor de políticas valha para os dois, em vez de haver um sistema de
+permissão paralelo que ninguém revisa. E o lease carrega as **negações** junto
+do escopo: um `allow` amplo não engole um `deny` específico, senão a máquina
+teria mais acesso que a pessoa a quem a mesma política se aplica.
 
 ## Limites conhecidos da auditoria
 

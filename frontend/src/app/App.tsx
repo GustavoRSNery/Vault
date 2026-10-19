@@ -6,6 +6,7 @@ import { PerfilPage } from '@/features/auth/PerfilPage'
 import { AuditoriaPage } from '@/features/audit/AuditoriaPage'
 import { PoliticasPage } from '@/features/admin/PoliticasPage'
 import { SolicitacoesPage } from '@/features/approvals/SolicitacoesPage'
+import { AplicacoesPage } from '@/features/machines/AplicacoesPage'
 import { AlertasPage } from '@/features/search/AlertasPage'
 import { BuscaPage } from '@/features/search/BuscaPage'
 import { NaoEncontrada } from './NaoEncontrada'
@@ -57,6 +58,7 @@ function Rotas() {
         <Route path="perfil" element={<PerfilPage />} />
         <Route path="admin/usuarios" element={<UsuariosPage />} />
         <Route path="admin/politicas" element={<PoliticasPage />} />
+        <Route path="admin/aplicacoes" element={<AplicacoesPage />} />
         <Route path="*" element={<NaoEncontrada />} />
       </Route>
     </Routes>

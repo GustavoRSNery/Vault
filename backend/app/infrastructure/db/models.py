@@ -442,3 +442,89 @@ class VaultSealModel(Base):
             postgresql_where=text("desselado_em IS NULL"),
         ),
     )
+
+
+class ApplicationModel(Base):
+    """Aplicacao ou RPA que consome segredos sem pessoa envolvida."""
+
+    __tablename__ = "aplicacoes"
+
+    id: Mapped[str] = _id_column()
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    owner_label: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="ativa", nullable=False)
+    lease_minutos: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    # Publico por contrato: identifica, nao autentica. Pode ir no codigo do robo.
+    role_id: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, index=True
+    )
+    # Papel que carrega as politicas desta aplicacao. RESTRICT: apagar um papel
+    # que concede acesso a um robo em producao precisa ser decisao consciente,
+    # nao efeito colateral de uma limpeza.
+    application_role_id: Mapped[str | None] = mapped_column(
+        ForeignKey("papeis.id", ondelete="RESTRICT"), nullable=True
+    )
+    created_at: Mapped[datetime] = _now_column()
+
+
+class SecretIdModel(Base):
+    """Credencial de autenticacao de uma aplicacao.
+
+    So o HASH e guardado. O valor em claro existe uma vez, na emissao — o
+    sistema nao pode recupera-lo depois, exatamente como senha de pessoa.
+    """
+
+    __tablename__ = "aplicacoes_credenciais"
+
+    id: Mapped[str] = _id_column()
+    application_id: Mapped[str] = mapped_column(
+        ForeignKey("aplicacoes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    secret_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    created_by: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    usos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = _now_column()
+
+
+class LeaseModel(Base):
+    """Acesso temporario concedido a uma aplicacao autenticada.
+
+    `caminhos` e `capacidades` sao o escopo CONGELADO na emissao: alterar a
+    politica depois nao amplia um lease ja emitido, o que evita escalada
+    silenciosa em quem ja esta autenticado.
+    """
+
+    __tablename__ = "aplicacoes_leases"
+
+    id: Mapped[str] = _id_column()
+    application_id: Mapped[str] = mapped_column(
+        ForeignKey("aplicacoes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    secret_id_usado: Mapped[str] = mapped_column(
+        ForeignKey("aplicacoes_credenciais.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    caminhos: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    capacidades: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    # Caminhos negados, congelados junto do escopo. Ver Lease.cobre.
+    negados: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    leituras: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = _now_column()
