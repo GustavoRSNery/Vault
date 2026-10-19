@@ -3,6 +3,8 @@ import { useAuth } from '@/features/auth/AuthContext'
 
 const ITENS = [
   { para: '/', rotulo: 'Dashboard', fim: true },
+  { para: '/busca', rotulo: 'Busca', fim: false },
+  { para: '/alertas', rotulo: 'Alertas', fim: false },
   { para: '/cofres', rotulo: 'Cofres', fim: false },
   { para: '/dispositivos', rotulo: 'Dispositivos', fim: false },
   { para: '/credenciais', rotulo: 'Credenciais', fim: false },

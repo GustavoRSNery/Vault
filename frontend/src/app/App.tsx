@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/features/auth/AuthContext'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { PerfilPage } from '@/features/auth/PerfilPage'
 import { AuditoriaPage } from '@/features/audit/AuditoriaPage'
 import { PoliticasPage } from '@/features/admin/PoliticasPage'
 import { SolicitacoesPage } from '@/features/approvals/SolicitacoesPage'
+import { AlertasPage } from '@/features/search/AlertasPage'
+import { BuscaPage } from '@/features/search/BuscaPage'
+import { NaoEncontrada } from './NaoEncontrada'
 import { CertificadosPage } from '@/features/inventory/CertificadosPage'
 import { CredenciaisPage } from '@/features/inventory/CredenciaisPage'
 import { DispositivosPage } from '@/features/inventory/DispositivosPage'
@@ -49,10 +52,12 @@ function Rotas() {
         <Route path="credenciais" element={<CredenciaisPage />} />
         <Route path="certificados" element={<CertificadosPage />} />
         <Route path="solicitacoes" element={<SolicitacoesPage />} />
+        <Route path="busca" element={<BuscaPage />} />
+        <Route path="alertas" element={<AlertasPage />} />
         <Route path="perfil" element={<PerfilPage />} />
         <Route path="admin/usuarios" element={<UsuariosPage />} />
         <Route path="admin/politicas" element={<PoliticasPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NaoEncontrada />} />
       </Route>
     </Routes>
   )
