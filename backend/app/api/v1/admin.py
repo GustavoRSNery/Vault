@@ -363,8 +363,14 @@ def simular_politica(
         rules=_para_regras(payload.rules),
         description="Política temporária de simulação.",
     )
+    # Sem nomear a política: o que está sendo avaliado é um rascunho que o
+    # usuário acabou de escrever e ainda não salvou. Citar o nome interno da
+    # política temporária faria a tela referir-se a algo inexistente para ele.
     permitido, motivo = explain(
-        [simulada], PolicyPath(payload.path), payload.capability
+        [simulada],
+        PolicyPath(payload.path),
+        payload.capability,
+        nomear_politica=False,
     )
     return SimularResponse(permitido=permitido, motivo=motivo)
 

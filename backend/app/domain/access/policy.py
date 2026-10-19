@@ -96,20 +96,33 @@ def explain(
     policies: list[Policy],
     path: PolicyPath,
     capability: Capability,
+    *,
+    nomear_politica: bool = True,
 ) -> tuple[bool, str]:
     """Como `evaluate`, mas devolve também o motivo — para a tela de permissões.
 
     O motivo é texto de interface: nomeia a política responsável pela decisão.
+
+    `nomear_politica=False` serve à simulação de um rascunho ainda não salvo:
+    ali a política não existe para quem edita, e citar um nome interno faria a
+    tela parecer referir-se a algo que o usuário não reconhece. A decisão é a
+    mesma; muda só como ela é dita.
     """
+
+    def origem(policy: Policy, rule: PolicyRule) -> str:
+        if nomear_politica:
+            return f"pela política {policy.name} em {rule.path}"
+        return f"pela regra em {rule.path}"
+
     matched_allow: str | None = None
     for policy in policies:
         for rule in policy.rules:
             if not rule.covers(path, capability):
                 continue
             if rule.effect is Effect.DENY:
-                return False, f"Negado pela política {policy.name} em {rule.path}."
+                return False, f"Negado {origem(policy, rule)}."
             if matched_allow is None:
-                matched_allow = f"Permitido pela política {policy.name} em {rule.path}."
+                matched_allow = f"Permitido {origem(policy, rule)}."
     if matched_allow is not None:
         return True, matched_allow
     return False, "Nenhuma política concede esta capacidade neste caminho."

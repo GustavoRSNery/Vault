@@ -19,12 +19,18 @@ type Certificado = {
   dias_restantes: number
 }
 
-/** Faixas da linha do tempo de expirações, como o inventário as define. */
+/**
+ * Faixas da linha do tempo de expirações.
+ *
+ * São ACUMULADAS: "até 30 dias" inclui o que vence em 7. Ler cada uma como
+ * fatia isolada inverte a leitura — alguém veria "até 7 = 0" ao lado de
+ * "até 30 = 1" e concluiria que falta um certificado em algum lugar.
+ */
 const FAIXAS = [
   { rotulo: 'Vencidos', limite: 0 },
-  { rotulo: 'Até 7 dias', limite: 7 },
-  { rotulo: 'Até 30 dias', limite: 30 },
-  { rotulo: 'Até 60 dias', limite: 60 },
+  { rotulo: 'Vencem em até 7 dias', limite: 7 },
+  { rotulo: 'Em até 30 dias', limite: 30 },
+  { rotulo: 'Em até 60 dias', limite: 60 },
 ]
 
 export function CertificadosPage() {
@@ -91,6 +97,11 @@ export function CertificadosPage() {
           urgência.
         </Alerta>
       )}
+
+      <p className="sub" style={{ margin: '0 0 -8px' }}>
+        As faixas abaixo são acumuladas: o que vence em 7 dias também conta em
+        30 e em 60.
+      </p>
 
       <div className="cards">
         {FAIXAS.map((faixa) => (

@@ -106,6 +106,38 @@ class TestExplain:
         assert permitido is False
         assert "Nenhuma política" in motivo
 
+    def test_sem_nomear_politica_cita_apenas_a_regra(self) -> None:
+        """Modo usado pela simulação de um rascunho ainda não salvo.
+
+        Ali a política não existe para quem edita: citar o nome interno faria a
+        tela referir-se a algo que o usuário não reconhece. A decisão é a mesma;
+        muda só como ela é dita.
+        """
+        policies = [
+            _policy("rascunho", _rule("cofres/*", Capability.READ, effect=Effect.DENY)),
+        ]
+        permitido, motivo = explain(
+            policies,
+            PolicyPath("cofres/rh"),
+            Capability.READ,
+            nomear_politica=False,
+        )
+        assert permitido is False
+        assert "rascunho" not in motivo
+        assert "pela regra em cofres/*" in motivo
+
+    def test_nomear_politica_nao_muda_a_decisao(self) -> None:
+        """O rótulo é texto de interface e não pode mexer no veredito."""
+        policies = [
+            _policy("leitura", _rule("cofres/rh", Capability.READ)),
+            _policy("bloqueio", _rule("cofres/*", Capability.READ, effect=Effect.DENY)),
+        ]
+        com, _ = explain(policies, PolicyPath("cofres/rh"), Capability.READ)
+        sem, _ = explain(
+            policies, PolicyPath("cofres/rh"), Capability.READ, nomear_politica=False
+        )
+        assert com == sem is False
+
 
 class TestRuleValidation:
     def test_regra_sem_capacidade_e_recusada(self) -> None:
