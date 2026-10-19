@@ -31,7 +31,8 @@ from ...domain.inventory.entities import (
     DeviceKind,
 )
 from ...domain.shared.errors import ConflictError, NotFoundError
-from ...domain.shared.value_objects import PolicyPath, Slug
+from ...domain.vaults.quorum import SeloComQuorum
+from ...domain.shared.value_objects import PolicyPath, Slug, utcnow
 from ...domain.vaults.entities import (
     EncryptedValue,
     Secret,
@@ -55,6 +56,7 @@ from .models import (
     SecretVersionModel,
     UserModel,
     VaultModel,
+    VaultSealModel,
 )
 
 
@@ -867,5 +869,74 @@ def _to_access_request(model: AccessRequestModel) -> AccessRequest:
         decided_at=_aware(model.decided_at),
         granted_until=_aware(model.granted_until),
         created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+class VaultSealRepository:
+    """Selos com quorum. O token nunca passa por aqui — so o hash."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, selo: SeloComQuorum) -> SeloComQuorum:
+        self._session.add(
+            VaultSealModel(
+                id=selo.id,
+                vault_id=selo.vault_id,
+                limiar=selo.limiar,
+                total_quinhoes=selo.total_quinhoes,
+                token_hash=selo.token_hash,
+                portadores=list(selo.portadores),
+                selado_por=selo.selado_por,
+                selado_em=selo.selado_em,
+            )
+        )
+        try:
+            self._session.flush()
+        except IntegrityError as erro:
+            self._session.rollback()
+            # O indice parcial pegou uma segunda selagem concorrente.
+            raise ConflictError(
+                "Este cofre acabou de ser selado por outra pessoa."
+            ) from erro
+        return selo
+
+    def ativo_do_cofre(self, vault_id: str) -> SeloComQuorum | None:
+        model = self._session.scalar(
+            select(VaultSealModel).where(
+                VaultSealModel.vault_id == vault_id,
+                VaultSealModel.desselado_em.is_(None),
+            )
+        )
+        return _to_selo(model) if model is not None else None
+
+    def historico_do_cofre(self, vault_id: str) -> list[SeloComQuorum]:
+        models = self._session.scalars(
+            select(VaultSealModel)
+            .where(VaultSealModel.vault_id == vault_id)
+            .order_by(VaultSealModel.selado_em.desc())
+        ).all()
+        return [_to_selo(m) for m in models]
+
+    def encerrar(self, selo_id: str, desselado_por: str) -> None:
+        """Marca o selo como usado. NAO apaga: a auditoria quer o historico."""
+        model = self._session.get(VaultSealModel, selo_id)
+        if model is None:
+            raise NotFoundError("Selo nao encontrado.")
+        model.desselado_em = utcnow()
+        model.desselado_por = desselado_por
+        self._session.flush()
+
+
+def _to_selo(model: VaultSealModel) -> SeloComQuorum:
+    return SeloComQuorum(
+        vault_id=model.vault_id,
+        limiar=model.limiar,
+        total_quinhoes=model.total_quinhoes,
+        token_hash=model.token_hash,
+        portadores=list(model.portadores or []),
+        selado_por=model.selado_por,
+        selado_em=_aware(model.selado_em),
         id=model.id,
     )

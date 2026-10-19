@@ -12,9 +12,14 @@ from sqlalchemy.orm import Session
 from ...application.vaults.reveal_secret import RevealSecret, RevealSecretCommand
 from ...domain.access.policy import Capability, evaluate
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
-from ...domain.shared.errors import DomainError, PermissionDeniedError
+from ...domain.shared.errors import (
+    ConflictError,
+    DomainError,
+    PermissionDeniedError,
+)
 from ...domain.shared.value_objects import Slug
 from ...domain.vaults.entities import Secret, SecretKind, Vault
+from ...domain.vaults.quorum import desselar_com_quorum, selar_com_quorum
 from ...infrastructure.crypto.envelope import EnvelopeCryptoService
 from ...infrastructure.db.repositories import (
     AccessRequestRepository,
@@ -22,6 +27,7 @@ from ...infrastructure.db.repositories import (
     PolicyRepository,
     SecretRepository,
     VaultRepository,
+    VaultSealRepository,
 )
 from ..deps import (
     CurrentUser,
@@ -30,6 +36,7 @@ from ..deps import (
     get_current_user,
     get_db,
     get_policies,
+    get_seals,
     get_secrets,
     get_vaults,
 )
@@ -88,6 +95,45 @@ class RevealResponse(BaseModel):
     secret_name: str
     version: int
     value: str
+
+
+class SelarComQuorumRequest(BaseModel):
+    """Quem recebe quinhão e quantos são necessários para abrir."""
+
+    portadores: list[str] = Field(min_length=2, max_length=16)
+    limiar: int = Field(ge=2, le=16)
+
+
+class QuinhaoResponse(BaseModel):
+    """Um quinhão, na ÚNICA vez em que ele existe em claro.
+
+    O sistema não o guarda. Quem recebe precisa anotá-lo agora — e isso é
+    dito na tela, porque uma pessoa que fecha a janela achando que dá para
+    consultar depois descobre tarde demais que não dá.
+    """
+
+    indice: int
+    portador: str
+    valor: str
+
+
+class SeloResponse(BaseModel):
+    limiar: int
+    total_quinhoes: int
+    portadores: list[str]
+    selado_por: str
+    selado_em: datetime
+
+
+class SelagemComQuorumResponse(BaseModel):
+    cofre: VaultResponse
+    selo: SeloResponse
+    quinhoes: list[QuinhaoResponse]
+    aviso: str
+
+
+class DesselarComQuorumRequest(BaseModel):
+    quinhoes: list[str] = Field(min_length=2, max_length=16)
 
 
 def _commit_then_raise(db: Session, error: DomainError) -> None:
@@ -487,6 +533,7 @@ def desselar(
     vaults: Annotated[VaultRepository, Depends(get_vaults)],
     policies: Annotated[PolicyRepository, Depends(get_policies)],
     audit: Annotated[AuditRepository, Depends(get_audit)],
+    seals: Annotated[VaultSealRepository, Depends(get_seals)],
     db: Annotated[Session, Depends(get_db)],
 ) -> VaultResponse:
     cofre = vaults.get_by_name(Slug(vault_name))
@@ -495,10 +542,199 @@ def desselar(
                              AuditOutcome.FAILURE, "Sem permissao para desselar o cofre."))
         _commit_then_raise(db, PermissionDeniedError("Voce nao pode desselar este cofre."))
 
+    # Um cofre selado com quórum NÃO abre por esta rota. Deixar abrir
+    # tornaria o quórum contornável por quem já tem ADMIN — ou seja, por
+    # exatamente quem ele existe para conter.
+    selo = seals.ativo_do_cofre(cofre.id)
+    if selo is not None:
+        audit.append(
+            _evento(
+                current, AuditAction.ACCESS_DENIED, str(cofre.path),
+                AuditOutcome.FAILURE,
+                "Tentou desselar sem quórum um cofre que exige quórum.",
+            )
+        )
+        _commit_then_raise(
+            db,
+            PermissionDeniedError(
+                f"Este cofre exige {selo.limiar} de {selo.total_quinhoes} "
+                "quinhões para ser aberto. Use a desselagem com quórum."
+            ),
+        )
+
     cofre.unseal()
     vaults.save_state(cofre)
     audit.append(_evento(current, AuditAction.VAULT_UNSEALED, str(cofre.path)))
     return _vault_response(cofre)
+
+
+@router.post(
+    "/{vault_name}/selar-com-quorum",
+    response_model=SelagemComQuorumResponse,
+    summary="Selar exigindo quórum para abrir",
+)
+def selar_com_quorum_rota(
+    vault_name: str,
+    payload: SelarComQuorumRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    seals: Annotated[VaultSealRepository, Depends(get_seals)],
+    db: Annotated[Session, Depends(get_db)],
+) -> SelagemComQuorumResponse:
+    """Sela o cofre e emite os quinhões.
+
+    Os quinhões aparecem UMA vez, nesta resposta, e não são guardados. É a
+    única forma de o sistema não poder abrir o cofre sozinho — que é o ponto
+    inteiro do mecanismo.
+    """
+    cofre = vaults.get_by_name(Slug(vault_name))
+    if not evaluate(policies.policies_for_user(current.id), cofre.path, Capability.ADMIN):
+        audit.append(
+            _evento(current, AuditAction.ACCESS_DENIED, str(cofre.path),
+                    AuditOutcome.FAILURE, "Sem permissão para selar o cofre.")
+        )
+        _commit_then_raise(db, PermissionDeniedError("Você não pode selar este cofre."))
+
+    if seals.ativo_do_cofre(cofre.id) is not None:
+        raise ConflictError("Este cofre já tem um selo com quórum ativo.")
+
+    selo, quinhoes = selar_com_quorum(
+        cofre.id, payload.portadores, payload.limiar, current.email
+    )
+    seals.add(selo)
+
+    # `seal()` recusa selar o que já está selado; o selo com quórum pode ser
+    # posto sobre um cofre já selado de forma simples, e aí só o estado do
+    # selo muda.
+    if not cofre.is_sealed:
+        cofre.seal()
+        vaults.save_state(cofre)
+
+    audit.append(
+        _evento(
+            current, AuditAction.VAULT_SEALED, str(cofre.path),
+            reason=(
+                f"Quórum de {payload.limiar} de {len(payload.portadores)}: "
+                f"{', '.join(payload.portadores)}."
+            ),
+        )
+    )
+
+    return SelagemComQuorumResponse(
+        cofre=_vault_response(cofre),
+        selo=_selo_response(selo),
+        quinhoes=[
+            QuinhaoResponse(indice=q.indice, portador=q.portador, valor=q.valor)
+            for q in quinhoes
+        ],
+        aviso=(
+            "Estes quinhões aparecem uma única vez e não ficam guardados. "
+            "Entregue cada um ao seu portador agora. Se todos forem perdidos, "
+            "o cofre não poderá mais ser aberto — e isso é intencional."
+        ),
+    )
+
+
+@router.post(
+    "/{vault_name}/desselar-com-quorum",
+    response_model=VaultResponse,
+    summary="Desselar apresentando os quinhões",
+)
+def desselar_com_quorum_rota(
+    vault_name: str,
+    payload: DesselarComQuorumRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    seals: Annotated[VaultSealRepository, Depends(get_seals)],
+    db: Annotated[Session, Depends(get_db)],
+) -> VaultResponse:
+    """Abre o cofre se os quinhões apresentados reconstruírem o token.
+
+    Exige ADMIN *além* dos quinhões: quem opera precisa de permissão, e os
+    portadores precisam concordar. São duas barreiras somadas, não uma
+    substituindo a outra.
+    """
+    cofre = vaults.get_by_name(Slug(vault_name))
+    if not evaluate(policies.policies_for_user(current.id), cofre.path, Capability.ADMIN):
+        audit.append(
+            _evento(current, AuditAction.ACCESS_DENIED, str(cofre.path),
+                    AuditOutcome.FAILURE, "Sem permissão para desselar o cofre.")
+        )
+        _commit_then_raise(db, PermissionDeniedError("Você não pode desselar este cofre."))
+
+    selo = seals.ativo_do_cofre(cofre.id)
+    if selo is None:
+        raise ConflictError("Este cofre não tem selo com quórum ativo.")
+
+    try:
+        desselar_com_quorum(selo, payload.quinhoes)
+    except DomainError as erro:
+        # Tentativa frustrada de abrir cofre é o evento que mais interessa
+        # numa revisão: registra antes de propagar.
+        audit.append(
+            _evento(
+                current, AuditAction.ACCESS_DENIED, str(cofre.path),
+                AuditOutcome.FAILURE,
+                f"Quórum não atingido ou quinhões inválidos. {erro}",
+            )
+        )
+        _commit_then_raise(db, erro)
+
+    seals.encerrar(selo.id, current.email)
+    if cofre.is_sealed:
+        cofre.unseal()
+        vaults.save_state(cofre)
+
+    audit.append(
+        _evento(
+            current, AuditAction.VAULT_UNSEALED, str(cofre.path),
+            reason=(
+                f"Quórum atingido: {len(payload.quinhoes)} de "
+                f"{selo.total_quinhoes} quinhões, limiar {selo.limiar}."
+            ),
+        )
+    )
+    return _vault_response(cofre)
+
+
+@router.get(
+    "/{vault_name}/selo",
+    response_model=SeloResponse | None,
+    summary="Selo com quórum do cofre",
+)
+def obter_selo(
+    vault_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    seals: Annotated[VaultSealRepository, Depends(get_seals)],
+) -> SeloResponse | None:
+    """Quem precisa ser chamado para abrir este cofre.
+
+    Não é segredo: saber que são necessárias 3 de 5 pessoas, e quais, não
+    ajuda a abrir o cofre — e esconder isso só atrapalharia quem precisa
+    organizar a cerimônia.
+    """
+    cofre = vaults.get_by_name(Slug(vault_name))
+    if not evaluate(policies.policies_for_user(current.id), cofre.path, Capability.READ):
+        raise PermissionDeniedError("Você não tem acesso a este cofre.")
+
+    selo = seals.ativo_do_cofre(cofre.id)
+    return _selo_response(selo) if selo is not None else None
+
+
+def _selo_response(selo) -> SeloResponse:  # noqa: ANN001
+    return SeloResponse(
+        limiar=selo.limiar,
+        total_quinhoes=selo.total_quinhoes,
+        portadores=selo.portadores,
+        selado_por=selo.selado_por,
+        selado_em=selo.selado_em,
+    )
 
 
 def _vault_response(vault: Vault) -> VaultResponse:

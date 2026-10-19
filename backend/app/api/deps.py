@@ -31,6 +31,7 @@ from ..infrastructure.db.repositories import (
     PolicyRepository,
     SecretRepository,
     VaultRepository,
+    VaultSealRepository,
 )
 
 _engine = None
@@ -175,6 +176,10 @@ def get_secrets(db: Annotated[Session, Depends(get_db)]) -> SecretRepository:
 
 def get_policies(db: Annotated[Session, Depends(get_db)]) -> PolicyRepository:
     return PolicyRepository(db)
+
+
+def get_seals(db: Annotated[Session, Depends(get_db)]) -> VaultSealRepository:
+    return VaultSealRepository(db)
 
 
 def get_audit(db: Annotated[Session, Depends(get_db)]) -> AuditRepository:

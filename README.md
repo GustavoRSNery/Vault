@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**43 das 57 telas** do inventário de arquitetura, **49 endpoints**, **364
+**43 das 57 telas** do inventário de arquitetura, **52 endpoints**, **436
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 
@@ -26,7 +26,7 @@ e conferidos no navegador.
 | **Solicitações de acesso temporário**, com concessão que caduca sozinha | — |
 | **Busca global** e **central de alertas**, ambas filtradas por permissão | Regras de notificação (dependem de canal de envio) |
 | Trilha de auditoria encadeada, **exportada e ancorada** | Destino inviolável de verdade (hoje é arquivo local) |
-| Selar e desselar cofre | Quórum Shamir para desselar |
+| Selar e desselar cofre, **com quórum Shamir** | — |
 
 Fora do escopo entregue, por fase: acesso de máquina para RPAs (AppRole,
 leases, consumo) é fase 2; gravação de sessão e integrações (SES, WhatsApp,
@@ -245,6 +245,28 @@ casar por conteúdo permitiria extraí-lo por tentativa e erro.
 **Alertas são derivados, não gravados.** Alerta persistido precisa ser apagado
 quando a causa some; esquecer disso produz alarme falso, que é pior do que
 painel vazio.
+
+**Quórum para desselar.** Selar sem quórum é frágil: quem sela desela
+sozinho, e um administrador comprometido abre o cofre na mesma sessão. Com
+quórum, a abertura exige `k` de `n` pessoas (Shamir sobre GF(256)).
+
+O que os quinhões protegem é um **token de desselagem**, não a chave-mestra.
+Partir a KEK seria a escolha óbvia e é a errada: no KMS ela não existe neste
+processo para ser partida, e com chave local toda rotação invalidaria os
+quinhões já distribuídos. Com token independente, selar e rotacionar não se
+atrapalham.
+
+Só o **hash** do token é guardado. Quem apresenta `k` quinhões reconstrói o
+token, o hash confere, o cofre abre — sem que o sistema tenha o token em lugar
+nenhum. Pelo mesmo motivo de senha ser hash: um dump do banco não abre nada.
+
+Os quinhões aparecem **uma única vez**, na resposta da selagem, e não são
+persistidos. Se todos forem perdidos, o cofre não abre mais; é a funcionalidade,
+não um defeito, e a tela avisa antes.
+
+A rota de desselagem simples **recusa** um cofre com quórum ativo — deixar
+passar tornaria o mecanismo contornável por quem já tem `ADMIN`, ou seja, por
+exatamente quem ele existe para conter.
 
 ## Limites conhecidos da auditoria
 

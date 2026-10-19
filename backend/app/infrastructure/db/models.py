@@ -397,3 +397,48 @@ class AccessRequestModel(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = _now_column()
+
+
+class VaultSealModel(Base):
+    """Selo com quorum de um cofre.
+
+    Guarda o HASH do token de desselagem, nunca o token: se guardasse, quem
+    lesse o banco abriria o cofre sem precisar de quinhao nenhum — e o quorum
+    nao protegeria de nada.
+
+    Os quinhoes tambem nao estao aqui. Eles existem so no momento da emissao e
+    vao para as pessoas; o sistema os esquece. Perder todos significa cofre que
+    nao abre mais, e isso e a funcionalidade.
+    """
+
+    __tablename__ = "cofres_selos"
+
+    id: Mapped[str] = _id_column()
+    vault_id: Mapped[str] = mapped_column(
+        ForeignKey("cofres.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    limiar: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_quinhoes: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    portadores: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    selado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    selado_em: Mapped[datetime] = _now_column()
+    # Preenchido ao desselar. O registro NAO e apagado: quem selou, quando e
+    # quem abriu e exatamente o que uma auditoria quer ler depois.
+    desselado_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    desselado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+
+    __table_args__ = (
+        # Um unico selo ativo por cofre. Sem isto, duas selagens concorrentes
+        # criariam dois conjuntos de quinhoes validos, e o segundo conjunto
+        # abriria o cofre sem que os portadores do primeiro soubessem.
+        Index(
+            "uq_selo_ativo_por_cofre",
+            "vault_id",
+            unique=True,
+            sqlite_where=text("desselado_em IS NULL"),
+            postgresql_where=text("desselado_em IS NULL"),
+        ),
+    )

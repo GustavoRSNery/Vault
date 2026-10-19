@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { CampoSegredo } from '@/features/secrets/CampoSegredo'
+import { SeloQuorum } from './SeloQuorum'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
 
@@ -172,6 +173,8 @@ export function CofreDetalhePage() {
           um administrador o desselasse.
         </Alerta>
       )}
+
+      <SeloQuorum cofre={nome} selado={selado} />
 
       {criando && (
         <NovoSegredo
