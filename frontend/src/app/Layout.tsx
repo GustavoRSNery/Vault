@@ -8,6 +8,13 @@ const ITENS = [
   { para: '/perfil', rotulo: 'Perfil', fim: false },
 ]
 
+// Itens que só aparecem para quem administra. Esconder não é proteger: as
+// rotas da API checam a política por requisição, independentemente do menu.
+const ITENS_ADMIN = [
+  { para: '/admin/usuarios', rotulo: 'Pessoas', fim: false },
+  { para: '/admin/politicas', rotulo: 'Políticas', fim: false },
+]
+
 export function Layout() {
   const { usuario, sair } = useAuth()
   const iniciais = (usuario?.full_name ?? '?')
@@ -40,6 +47,22 @@ export function Layout() {
             {item.rotulo}
           </NavLink>
         ))}
+
+        {usuario?.is_admin && (
+          <>
+            <div className="nav-cap">Administração</div>
+            {ITENS_ADMIN.map((item) => (
+              <NavLink
+                key={item.para}
+                to={item.para}
+                end={item.fim}
+                className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+              >
+                {item.rotulo}
+              </NavLink>
+            ))}
+          </>
+        )}
 
         <div className="foot">
           <button className="nav-item" onClick={sair} style={{ width: '100%', textAlign: 'left', border: 0, background: 'none', cursor: 'pointer' }}>

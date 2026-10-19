@@ -53,6 +53,11 @@ def main() -> None:
         politica.rules = [
             PolicyRuleModel(path="cofres", capabilities=TODAS, effect="allow"),
             PolicyRuleModel(path="cofres/*", capabilities=TODAS, effect="allow"),
+            # Gestao de pessoas, papeis e politicas. Caminho separado de
+            # "cofres" de proposito: dar acesso amplo a segredos nao deveria,
+            # por si, entregar o poder de reescrever quem acessa o que.
+            PolicyRuleModel(path="admin", capabilities=TODAS, effect="allow"),
+            PolicyRuleModel(path="admin/*", capabilities=TODAS, effect="allow"),
         ]
         session.add(politica)
         session.flush()

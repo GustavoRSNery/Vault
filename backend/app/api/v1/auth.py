@@ -9,10 +9,20 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from ...application.access.login import Login, LoginCommand
+from ...domain.access.policy import Capability, evaluate
 from ...domain.shared.errors import AuthenticationError
+from ...domain.shared.value_objects import PolicyPath
 from ...infrastructure.auth.tokens import REFRESH, TokenService
 from ...infrastructure.db.models import UserModel
-from ..deps import CurrentUser, get_current_user, get_db, get_login, get_tokens
+from ...infrastructure.db.repositories import PolicyRepository
+from ..deps import (
+    CurrentUser,
+    get_current_user,
+    get_db,
+    get_login,
+    get_policies,
+    get_tokens,
+)
 
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
 
@@ -46,6 +56,10 @@ class MeResponse(BaseModel):
     email: str
     full_name: str
     mfa_enabled: bool
+    # Quem decide e a politica, no servidor. O front usa isto apenas para
+    # escolher o que desenhar no menu: cada rota de admin checa de novo, e
+    # esconder item de menu nunca e controle de acesso.
+    is_admin: bool
 
 
 @router.post("/login", response_model=LoginResponse, summary="Entrar")
@@ -103,14 +117,20 @@ def refresh(
 def me(
     current: Annotated[CurrentUser, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
 ) -> MeResponse:
     user = db.get(UserModel, current.id)
     assert user is not None  # get_current_user já garantiu
+    minhas = policies.policies_for_user(current.id)
     return MeResponse(
         id=user.id,
         email=user.email,
         full_name=user.full_name,
         mfa_enabled=user.mfa_enabled,
+        is_admin=(
+            evaluate(minhas, PolicyPath("admin"), Capability.ADMIN)
+            or evaluate(minhas, PolicyPath("auditoria"), Capability.ADMIN)
+        ),
     )
 
 

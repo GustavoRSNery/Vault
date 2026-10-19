@@ -15,6 +15,9 @@ export type Usuario = {
   email: string
   full_name: string
   mfa_enabled: boolean
+  /** Decidido pela política no servidor. Serve só para montar o menu: cada
+   *  rota de admin checa de novo, e esconder item nunca é controle de acesso. */
+  is_admin: boolean
 }
 
 type LoginResponse = {

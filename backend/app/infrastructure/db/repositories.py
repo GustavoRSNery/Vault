@@ -33,6 +33,7 @@ from .models import (
     AuditEventModel,
     PolicyModel,
     PolicyRuleModel,
+    RoleModel,
     SecretModel,
     SecretVersionModel,
     UserModel,
@@ -183,6 +184,126 @@ class PolicyRepository:
                 if policy_model.id not in seen:
                     seen[policy_model.id] = _to_policy(policy_model)
         return list(seen.values())
+
+    def list_all(self) -> list[Policy]:
+        """Todas as politicas cadastradas, para a tela de administracao."""
+        models = self._session.scalars(
+            select(PolicyModel).order_by(PolicyModel.name)
+        ).all()
+        return [_to_policy(m) for m in models]
+
+    def get_by_name(self, name: Slug) -> Policy:
+        model = self._session.scalar(
+            select(PolicyModel).where(PolicyModel.name == str(name))
+        )
+        if model is None:
+            raise NotFoundError(f"Politica '{name}' nao encontrada.")
+        return _to_policy(model)
+
+    def roles_of_policy(self, policy_id: str) -> list[str]:
+        """Nomes dos papeis que carregam esta politica."""
+        model = self._session.get(PolicyModel, policy_id)
+        if model is None:
+            raise NotFoundError("Politica nao encontrada.")
+        return sorted(role.name for role in model.roles)
+
+    def replace_rules(self, policy_id: str, rules: list[PolicyRule]) -> Policy:
+        """Troca as regras da politica inteira.
+
+        E substituicao, nao merge: o editor da tela envia o conjunto completo,
+        e aplicar diferenca parcial deixaria regra orfa concedendo acesso que
+        ninguem mais ve na interface.
+        """
+        if not rules:
+            raise ConflictError("A politica precisa de ao menos uma regra.")
+        model = self._session.get(PolicyModel, policy_id)
+        if model is None:
+            raise NotFoundError("Politica nao encontrada.")
+        model.rules = [
+            PolicyRuleModel(
+                policy_id=policy_id,
+                path=str(rule.path),
+                capabilities=sorted(str(c) for c in rule.capabilities),
+                effect=str(rule.effect),
+            )
+            for rule in rules
+        ]
+        self._session.flush()
+        return _to_policy(model)
+
+
+class UserRepository:
+    """Leitura e administracao de contas.
+
+    Nao expoe password_hash nem o segredo de MFA: quem precisa autenticar usa
+    o caso de uso de login, que le o model diretamente. Aqui so trafega o que
+    a tela de administracao mostra.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_all(self) -> list[UserModel]:
+        return list(
+            self._session.scalars(select(UserModel).order_by(UserModel.full_name)).all()
+        )
+
+    def get(self, user_id: str) -> UserModel:
+        user = self._session.get(UserModel, user_id)
+        if user is None:
+            raise NotFoundError("Usuario nao encontrado.")
+        return user
+
+    def get_by_email(self, email: str) -> UserModel | None:
+        return self._session.scalar(
+            select(UserModel).where(UserModel.email == email.strip().lower())
+        )
+
+    def set_active(self, user_id: str, active: bool) -> UserModel:
+        user = self.get(user_id)
+        user.is_active = active
+        self._session.flush()
+        return user
+
+    def reset_mfa(self, user_id: str) -> UserModel:
+        """Desliga o MFA e descarta o segredo cifrado.
+
+        Usado quando alguem perde o dispositivo. Zerar o material e nao apenas
+        o booleano evita que reativar reaproveite um segredo que pode ter
+        vazado junto com o aparelho.
+        """
+        user = self.get(user_id)
+        user.mfa_enabled = False
+        user.mfa_secret_ciphertext = None
+        user.mfa_secret_nonce = None
+        user.mfa_secret_wrapped_dek = None
+        user.mfa_key_id = None
+        self._session.flush()
+        return user
+
+    def list_roles(self) -> list[RoleModel]:
+        return list(
+            self._session.scalars(select(RoleModel).order_by(RoleModel.name)).all()
+        )
+
+    def set_roles(self, user_id: str, role_names: list[str]) -> UserModel:
+        """Substitui os papeis do usuario pelo conjunto informado."""
+        user = self.get(user_id)
+        if role_names:
+            papeis = list(
+                self._session.scalars(
+                    select(RoleModel).where(RoleModel.name.in_(role_names))
+                ).all()
+            )
+            encontrados = {r.name for r in papeis}
+            faltando = sorted(set(role_names) - encontrados)
+            if faltando:
+                raise NotFoundError(f"Papel inexistente: {', '.join(faltando)}.")
+            user.roles = papeis
+        else:
+            user.roles = []
+        self._session.flush()
+        return user
 
 
 class AuditRepository:

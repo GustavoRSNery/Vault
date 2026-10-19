@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from '@/features/auth/AuthContext'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { PerfilPage } from '@/features/auth/PerfilPage'
 import { AuditoriaPage } from '@/features/audit/AuditoriaPage'
+import { PoliticasPage } from '@/features/admin/PoliticasPage'
+import { UsuariosPage } from '@/features/admin/UsuariosPage'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CofreDetalhePage } from '@/features/vaults/CofreDetalhePage'
 import { CofresPage } from '@/features/vaults/CofresPage'
@@ -40,6 +42,8 @@ function Rotas() {
         <Route path="cofres/:nome" element={<CofreDetalhePage />} />
         <Route path="auditoria" element={<AuditoriaPage />} />
         <Route path="perfil" element={<PerfilPage />} />
+        <Route path="admin/usuarios" element={<UsuariosPage />} />
+        <Route path="admin/politicas" element={<PoliticasPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

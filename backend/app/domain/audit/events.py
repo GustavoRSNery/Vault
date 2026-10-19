@@ -52,6 +52,11 @@ class AuditAction(StrEnum):
     PERMISSION_GRANTED = "permissao_concedida"
     PERMISSION_REVOKED = "permissao_revogada"
     ACCESS_DENIED = "acesso_negado"
+    POLICY_UPDATED = "politica_alterada"
+    USER_ACTIVATED = "usuario_ativado"
+    USER_DEACTIVATED = "usuario_desativado"
+    USER_MFA_RESET = "usuario_mfa_reiniciado"
+    USER_ROLES_CHANGED = "usuario_papeis_alterados"
 
 
 class AuditOutcome(StrEnum):

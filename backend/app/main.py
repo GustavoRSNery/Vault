@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.errors import domain_error_handler, unexpected_error_handler
-from .api.v1 import audit, auth, mfa, vaults
+from .api.v1 import admin, audit, auth, mfa, vaults
 from .config import get_settings
 from .domain.shared.errors import DomainError
 
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(mfa.router, prefix="/api/v1")
     app.include_router(vaults.router, prefix="/api/v1")
     app.include_router(audit.router, prefix="/api/v1")
+    app.include_router(admin.router, prefix="/api/v1")
 
     @app.get("/saude", tags=["Infraestrutura"], summary="Verificação de saúde")
     def saude() -> dict[str, str]:
