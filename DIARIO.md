@@ -6,6 +6,43 @@ código já conta o quê.
 
 ---
 
+## 2026-10-19 — Configurações operacionais pela interface
+
+**Decidi:** expor só os prazos que são decisão operacional, e deixar os
+limites de segurança como constantes no código.
+**Porque:** a pergunta que separa os dois é *se alguém escolher o pior valor
+possível, isso enfraquece a segurança?* Quórum mínimo de 2 ajustável viraria
+1 na primeira vez que alguém se irritasse com a cerimônia. Configuração que
+permite desligar a própria proteção é pior que configuração nenhuma: dá
+impressão de flexibilidade e entrega um sistema que se desarma na pressa.
+**Descartei:** expor tudo o que é constante hoje (incluindo `TOKEN_BYTES`,
+`LIMIAR_MINIMO`, teto do lease).
+**Na tela:** há um cartão explicando cada exclusão — senão alguém abre um
+chamado pedindo para ajustar, e a resposta fica perdida numa conversa.
+
+**Decidi também:** linha única por instalação, não por cofre.
+**Porque:** configuração por cofre produziria combinações que ninguém revisa,
+e "qual prazo vale aqui?" deixaria de ter resposta única.
+**Reversível:** a chave primária é fixa em "unica"; passar a ter uma por
+cofre exigiria migration, mas o domínio não impede.
+
+**Feito:** domínio `settings` com faixas que recusam o absurdo (explicando o
+porquê), 2 rotas, tela de Configurações, e os valores LIGADOS onde importam —
+certificados, custódia, trilha e o tempo de exibição no front.
+
+**Validado:** 527 testes em SQLite e Postgres, 2 mutantes mortos (ambos
+tornando a configuração decorativa). No ambiente real: contadora lê e não
+altera, limites recusam valores absurdos, e ampliar a faixa mudou
+`api-rede` de "válido" para "vencendo" — a configuração surte efeito.
+**Commit:** `6a7c889` Configurações operacionais pela interface
+
+**Princípio que vale repetir:** configuração decorativa é pior que
+inexistente. Alguém ajusta, acha que mudou algo, e só descobre o contrário
+num incidente. Por isso cada ajuste tem um teste que prova a mudança de
+comportamento, não só a persistência do número.
+
+---
+
 ## 2026-10-19 — Rotação de credencial pelo próprio robô
 
 **Decidi:** NÃO criar agendador interno de rotação.
@@ -288,5 +325,3 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
       envio de e-mail (SES ou equivalente).
 - [ ] **Regras de notificação** — **BLOQUEADO:** exige canal de envio.
 - [ ] **Fase 3: gravação de sessão** — 3 telas. Escopo grande, avaliar se vale.
-- [ ] **Configurações na interface** — prazos e retenção hoje por variável de
-      ambiente. Baixo valor enquanto o sistema tem um administrador só.
