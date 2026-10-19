@@ -63,6 +63,22 @@ type Consumo = {
   nunca_lidos: string[]
 }
 
+type CredencialVencendo = {
+  aplicacao: string
+  responsavel: string
+  credencial_id: string
+  label: string
+  dias_para_vencer: number | null
+  ultimo_uso: string | null
+  nunca_usada: boolean
+}
+
+type Vencimentos = {
+  dias: number
+  vencendo: CredencialVencendo[]
+  nunca_usadas: CredencialVencendo[]
+}
+
 type Papel = { id: string; name: string; policies: string[] }
 
 export function AplicacoesPage() {
@@ -83,6 +99,12 @@ export function AplicacoesPage() {
   const { data: apps, isLoading, error } = useQuery({
     queryKey: ['aplicacoes'],
     queryFn: () => request<Aplicacao[]>('/aplicacoes'),
+  })
+
+  const { data: vencimentos } = useQuery({
+    queryKey: ['vencimentos'],
+    queryFn: () => request<Vencimentos>('/aplicacoes-vencimentos'),
+    retry: false,
   })
 
   if (isLoading) return <Carregando texto="Carregando aplicações…" />
@@ -126,6 +148,33 @@ export function AplicacoesPage() {
       </header>
 
       {erro && <Alerta tom="danger">{erro}</Alerta>}
+
+      {vencimentos && vencimentos.vencendo.length > 0 && (
+        <Alerta tom="warning">
+          {vencimentos.vencendo.length === 1
+            ? '1 credencial vence'
+            : `${vencimentos.vencendo.length} credenciais vencem`}{' '}
+          nos próximos {vencimentos.dias} dias:{' '}
+          {vencimentos.vencendo
+            .map((c) => `${c.aplicacao} (${c.dias_para_vencer}d)`)
+            .join(', ')}
+          . O robô pode trocar a própria credencial sem parar — a anterior
+          ainda vale por alguns minutos depois da troca.
+        </Alerta>
+      )}
+
+      {vencimentos && vencimentos.nunca_usadas.length > 0 && (
+        <Alerta tom="warning">
+          {vencimentos.nunca_usadas.length === 1
+            ? '1 credencial foi emitida e nunca usada'
+            : `${vencimentos.nunca_usadas.length} credenciais foram emitidas e nunca usadas`}
+          :{' '}
+          {vencimentos.nunca_usadas
+            .map((c) => `${c.aplicacao}/${c.label || 'sem rótulo'}`)
+            .join(', ')}
+          . Credencial esquecida autentica do mesmo jeito — vale revogar.
+        </Alerta>
+      )}
 
       {criando && (
         <NovaAplicacao

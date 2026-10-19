@@ -1089,3 +1089,237 @@ class TestNuncaLidosSemFalsoPositivo:
         ).json()
         # O RH foi concedido e nunca tocado: o alerta precisa aparecer.
         assert consumo["nunca_lidos"] == ["cofres/rh"]
+
+
+class TestRenovacaoPeloRobo:
+    """O robô troca a própria credencial, sem agendador interno.
+
+    Um processo de rotação dentro do Vault competiria com o orquestrador que
+    a empresa já tem. Quem sabe quando é seguro trocar é o robô — entre dois
+    ciclos, não no meio de um.
+    """
+
+    def _preparar(
+        self, client: TestClient, headers: dict[str, str], usuario: UserModel,
+        db: Session,
+    ) -> tuple[str, str]:
+        conceder(db, usuario, "cofres/*", TODAS, nome_politica="p-cofres")
+        conceder(db, usuario, "aplicacoes", TODAS, nome_politica="p-apps")
+        _cenario(client, headers)
+        _papel_da_aplicacao(db, "rpa-rota", "cofres/contabil/*", ["read", "reveal"])
+
+        criada = client.post(
+            "/api/v1/aplicacoes",
+            headers=headers,
+            json={
+                "name": "rpa-rota", "display_name": "RPA Rotação",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-rota",
+            },
+        )
+        credencial = client.post(
+            "/api/v1/aplicacoes/rpa-rota/credenciais",
+            headers=headers,
+            json={"label": "inicial"},
+        )
+        return criada.json()["role_id"], credencial.json()["secret_id"]
+
+    def test_robo_troca_a_propria_credencial(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        role_id, antiga = self._preparar(client, autenticado, usuario, db_session)
+
+        renovacao = client.post(
+            "/api/v1/maquina/renovar",
+            json={"role_id": role_id, "secret_id": antiga},
+        )
+        assert renovacao.status_code == 200
+        nova = renovacao.json()["secret_id"]
+        assert nova != antiga
+
+        # A nova autentica.
+        assert client.post(
+            "/api/v1/maquina/autenticar",
+            json={"role_id": role_id, "secret_id": nova},
+        ).status_code == 200
+
+    def test_a_antiga_ainda_vale_no_periodo_de_graca(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """Matar na hora derrubaria um ciclo em andamento."""
+        role_id, antiga = self._preparar(client, autenticado, usuario, db_session)
+        client.post(
+            "/api/v1/maquina/renovar",
+            json={"role_id": role_id, "secret_id": antiga},
+        )
+
+        # Logo depois da troca, a antiga ainda autentica.
+        assert client.post(
+            "/api/v1/maquina/autenticar",
+            json={"role_id": role_id, "secret_id": antiga},
+        ).status_code == 200
+
+    def test_credencial_errada_nao_renova(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """Renovar exige a credencial atual: senão qualquer um se emitiria."""
+        role_id, _ = self._preparar(client, autenticado, usuario, db_session)
+
+        resposta = client.post(
+            "/api/v1/maquina/renovar",
+            json={"role_id": role_id, "secret_id": "inventado"},
+        )
+        assert resposta.status_code == 401
+
+    def test_renovacao_fica_na_trilha(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        role_id, antiga = self._preparar(client, autenticado, usuario, db_session)
+        client.post(
+            "/api/v1/maquina/renovar",
+            json={"role_id": role_id, "secret_id": antiga},
+        )
+
+        evento = db_session.scalars(
+            select(AuditEventModel).where(
+                AuditEventModel.action == "aplicacao_credencial_rotacionada"
+            )
+        ).one()
+        assert evento.actor_label == "maquina:rpa-rota"
+        # Jamais o valor da credencial.
+        assert antiga not in evento.reason
+
+    def test_credencial_revogada_nao_renova(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        role_id, antiga = self._preparar(client, autenticado, usuario, db_session)
+        credenciais = client.get(
+            "/api/v1/aplicacoes/rpa-rota/credenciais", headers=autenticado
+        ).json()
+        client.post(
+            f"/api/v1/aplicacoes/rpa-rota/credenciais/{credenciais[0]['id']}/revogar",
+            headers=autenticado,
+        )
+
+        assert client.post(
+            "/api/v1/maquina/renovar",
+            json={"role_id": role_id, "secret_id": antiga},
+        ).status_code == 401
+
+
+class TestVencimentos:
+    def test_lista_o_que_vence_no_periodo(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        conceder(db_session, usuario, "aplicacoes", TODAS, nome_politica="p-apps")
+        _papel_da_aplicacao(db_session, "rpa-venc", "cofres/*", ["read"])
+        client.post(
+            "/api/v1/aplicacoes",
+            headers=autenticado,
+            json={
+                "name": "rpa-venc", "display_name": "Venc",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-venc",
+            },
+        )
+        client.post(
+            "/api/v1/aplicacoes/rpa-venc/credenciais",
+            headers=autenticado,
+            json={"label": "curta", "dias_de_validade": 5},
+        )
+        client.post(
+            "/api/v1/aplicacoes/rpa-venc/credenciais",
+            headers=autenticado,
+            json={"label": "longa", "dias_de_validade": 300},
+        )
+
+        relatorio = client.get(
+            "/api/v1/aplicacoes-vencimentos?dias=30", headers=autenticado
+        ).json()
+        rotulos = [c["label"] for c in relatorio["vencendo"]]
+        assert rotulos == ["curta"]
+
+    def test_nunca_usadas_vem_em_lista_propria(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """Credencial emitida e esquecida autentica do mesmo jeito."""
+        conceder(db_session, usuario, "cofres/*", TODAS, nome_politica="p-cofres")
+        conceder(db_session, usuario, "aplicacoes", TODAS, nome_politica="p-apps")
+        _papel_da_aplicacao(db_session, "rpa-ociosa", "cofres/*", ["read"])
+        criada = client.post(
+            "/api/v1/aplicacoes",
+            headers=autenticado,
+            json={
+                "name": "rpa-ociosa", "display_name": "Ociosa",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-ociosa",
+            },
+        )
+        usada = client.post(
+            "/api/v1/aplicacoes/rpa-ociosa/credenciais",
+            headers=autenticado,
+            json={"label": "em-uso"},
+        )
+        client.post(
+            "/api/v1/aplicacoes/rpa-ociosa/credenciais",
+            headers=autenticado,
+            json={"label": "esquecida"},
+        )
+        # Só a primeira é usada.
+        client.post(
+            "/api/v1/maquina/autenticar",
+            json={
+                "role_id": criada.json()["role_id"],
+                "secret_id": usada.json()["secret_id"],
+            },
+        )
+
+        relatorio = client.get(
+            "/api/v1/aplicacoes-vencimentos", headers=autenticado
+        ).json()
+        rotulos = [c["label"] for c in relatorio["nunca_usadas"]]
+        assert "esquecida" in rotulos
+        assert "em-uso" not in rotulos
+
+    def test_revogada_nao_aparece(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        conceder(db_session, usuario, "aplicacoes", TODAS, nome_politica="p-apps")
+        _papel_da_aplicacao(db_session, "rpa-rev", "cofres/*", ["read"])
+        client.post(
+            "/api/v1/aplicacoes",
+            headers=autenticado,
+            json={
+                "name": "rpa-rev", "display_name": "Rev",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-rev",
+            },
+        )
+        cred = client.post(
+            "/api/v1/aplicacoes/rpa-rev/credenciais",
+            headers=autenticado,
+            json={"label": "revogada", "dias_de_validade": 3},
+        )
+        client.post(
+            f"/api/v1/aplicacoes/rpa-rev/credenciais/{cred.json()['id']}/revogar",
+            headers=autenticado,
+        )
+
+        relatorio = client.get(
+            "/api/v1/aplicacoes-vencimentos", headers=autenticado
+        ).json()
+        assert all(c["label"] != "revogada" for c in relatorio["vencendo"])
+        assert all(c["label"] != "revogada" for c in relatorio["nunca_usadas"])
+
+    def test_sem_admin_nao_ve(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        conceder(db_session, usuario, "cofres/*", TODAS)
+        assert client.get(
+            "/api/v1/aplicacoes-vencimentos", headers=autenticado
+        ).status_code == 403

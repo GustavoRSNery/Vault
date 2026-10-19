@@ -183,6 +183,44 @@ class ConsumoResponse(BaseModel):
     nunca_lidos: list[str]
 
 
+class RenovarRequest(BaseModel):
+    """O robô apresenta a credencial atual e recebe a próxima."""
+
+    role_id: str = Field(min_length=1, max_length=64)
+    secret_id: str = Field(min_length=1, max_length=200)
+    dias_de_validade: int | None = Field(default=None, ge=1, le=3650)
+
+
+class RenovacaoResponse(BaseModel):
+    secret_id: str
+    expires_at: datetime | None
+    anterior_vale_ate: datetime
+    aviso: str
+
+
+class CredencialVencendo(BaseModel):
+    aplicacao: str
+    responsavel: str
+    credencial_id: str
+    label: str
+    dias_para_vencer: int | None
+    ultimo_uso: datetime | None
+    nunca_usada: bool
+
+
+class VencimentosResponse(BaseModel):
+    """Credenciais que vencem em breve, e as que nunca foram usadas.
+
+    As duas listas pedem ação diferente: a primeira é renovar antes que o
+    robô pare; a segunda é apagar, porque credencial emitida e nunca usada é
+    credencial que alguém esqueceu — e ela autentica do mesmo jeito.
+    """
+
+    dias: int
+    vencendo: list[CredencialVencendo]
+    nunca_usadas: list[CredencialVencendo]
+
+
 class LerSegredoRequest(BaseModel):
     cofre: str = Field(min_length=1, max_length=64)
     segredo: str = Field(min_length=1, max_length=64)
@@ -673,6 +711,147 @@ def autenticar(
         capacidades=[str(c) for c in lease.capacidades],
         negados=lease.negados,
     )
+
+
+@router.post(
+    "/maquina/renovar",
+    response_model=RenovacaoResponse,
+    summary="Trocar a própria credencial",
+)
+def renovar_credencial(
+    payload: RenovarRequest,
+    apps: Annotated[ApplicationRepository, Depends(get_applications)],
+    secret_ids: Annotated[SecretIdRepository, Depends(get_secret_ids)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> RenovacaoResponse:
+    """O robô troca a própria credencial, autenticando com a atual.
+
+    Deliberadamente **sem agendador interno**: um processo de rotação dentro
+    do Vault competiria com o orquestrador que a empresa já tem, e um cofre
+    com cron embutido é mais uma coisa para monitorar. Quem sabe quando é
+    seguro trocar é o próprio robô — entre dois ciclos de trabalho, não no
+    meio de um.
+
+    A credencial antiga não morre na hora: ganha alguns minutos de graça, para
+    que um ciclo em andamento com ela em memória não seja derrubado pela
+    própria rotação.
+    """
+    app = apps.get_by_role_id(payload.role_id)
+    if app is None:
+        audit.append(
+            _evento(
+                None, f"maquina:{payload.role_id[:12]}", AuditAction.LOGIN_FAILURE,
+                str(CAMINHO_APLICACOES), AuditOutcome.FAILURE,
+                "role_id desconhecido na renovação.",
+            )
+        )
+        db.commit()
+        raise AuthenticationError(FALHA_AUTENTICACAO)
+
+    atual = secret_ids.find_valid(app.id, payload.secret_id)
+    if atual is None:
+        audit.append(
+            _evento(
+                None, f"maquina:{app.name}", AuditAction.LOGIN_FAILURE,
+                str(app.path), AuditOutcome.FAILURE,
+                "secret_id inválido na renovação.",
+            )
+        )
+        db.commit()
+        raise AuthenticationError(FALHA_AUTENTICACAO)
+
+    if not app.is_active:
+        raise AuthenticationError(FALHA_AUTENTICACAO)
+
+    # Nova credencial primeiro: se a emissão falhar, a antiga continua
+    # intacta e o robô segue funcionando.
+    valor, digest = gerar_secret_id()
+    expira = None
+    if payload.dias_de_validade is not None:
+        from datetime import timedelta
+
+        from ...domain.shared.value_objects import utcnow as _agora
+
+        expira = _agora() + timedelta(days=payload.dias_de_validade)
+
+    nova = SecretId(
+        application_id=app.id,
+        secret_hash=digest,
+        label=f"renovada de {atual.label or atual.id[:8]}",
+        created_by=f"maquina:{app.name}",
+        expires_at=expira,
+    )
+    secret_ids.add(nova)
+
+    vale_ate = atual.aposentar_com_graca()
+    secret_ids.save(atual)
+
+    audit.append(
+        _evento(
+            None, f"maquina:{app.name}", AuditAction.APPLICATION_CREDENTIAL_ROTATED,
+            str(app.path),
+            reason=f"Credencial trocada pelo próprio robô; anterior vale até {vale_ate:%d/%m %H:%M}.",
+        )
+    )
+
+    return RenovacaoResponse(
+        secret_id=valor,
+        expires_at=expira,
+        anterior_vale_ate=vale_ate,
+        aviso=(
+            "Guarde a credencial nova agora. A anterior continua valendo por "
+            "poucos minutos, só para não derrubar um ciclo em andamento."
+        ),
+    )
+
+
+@router.get(
+    "/aplicacoes-vencimentos",
+    response_model=VencimentosResponse,
+    summary="Credenciais vencendo e ociosas",
+)
+def vencimentos(
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    apps: Annotated[ApplicationRepository, Depends(get_applications)],
+    secret_ids: Annotated[SecretIdRepository, Depends(get_secret_ids)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+    dias: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> VencimentosResponse:
+    """O que precisa de ação antes que um robô pare — ou vaze.
+
+    Credencial nunca usada aparece em lista própria porque o problema dela é
+    outro: não é "vai vencer", é "alguém emitiu e esqueceu" — e ela autentica
+    do mesmo jeito que as em uso.
+    """
+    _exigir_admin(current, policies, audit, db, "ver vencimentos")
+
+    vencendo: list[CredencialVencendo] = []
+    ociosas: list[CredencialVencendo] = []
+
+    for app in apps.list_all():
+        for credencial in secret_ids.list_for_application(app.id):
+            if not credencial.is_valid():
+                continue
+            linha = CredencialVencendo(
+                aplicacao=str(app.name),
+                responsavel=app.owner_label,
+                credencial_id=credencial.id,
+                label=credencial.label,
+                dias_para_vencer=credencial.dias_para_vencer(),
+                ultimo_uso=credencial.last_used_at,
+                nunca_usada=credencial.usos == 0,
+            )
+            restantes = credencial.dias_para_vencer()
+            if restantes is not None and restantes <= dias:
+                vencendo.append(linha)
+            if credencial.usos == 0:
+                ociosas.append(linha)
+
+    vencendo.sort(key=lambda c: c.dias_para_vencer or 0)
+    return VencimentosResponse(dias=dias, vencendo=vencendo, nunca_usadas=ociosas)
 
 
 @router.post(

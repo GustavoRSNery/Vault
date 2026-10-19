@@ -49,6 +49,11 @@ SECRET_ID_BYTES = 32
 LEASE_MINUTOS_MAXIMO = 720  # 12 horas
 LEASE_MINUTOS_PADRAO = 60
 
+# Quanto tempo a credencial antiga ainda vale depois de renovada. Matar na
+# hora derrubaria um robô que esteja no meio de um ciclo com a credencial
+# velha em memória; 10 minutos cobrem a troca sem deixar a antiga viva.
+GRACA_PADRAO_MINUTOS = 10
+
 
 class ApplicationStatus(StrEnum):
     ACTIVE = "ativa"
@@ -160,6 +165,33 @@ class SecretId:
         if self.is_revoked:
             raise ConflictError("Esta credencial já foi revogada.")
         self.revoked_at = at or utcnow()
+
+    def aposentar_com_graca(
+        self, minutos: int = GRACA_PADRAO_MINUTOS, now: datetime | None = None
+    ) -> datetime:
+        """Agenda o fim desta credencial, em vez de matá-la agora.
+
+        Usado na renovação: o robô pode estar no meio de um ciclo com a
+        credencial antiga em memória, e revogar na hora o derrubaria. O prazo
+        é curto de propósito — graça longa é credencial velha viva.
+
+        Se a credencial já expira antes do fim da graça, o prazo dela manda:
+        a graça não pode esticar a validade de uma credencial vencida.
+        """
+        if self.is_revoked:
+            raise ConflictError("Esta credencial já foi revogada.")
+        agora = now or utcnow()
+        fim = agora + timedelta(minutes=minutos)
+        if self.expires_at is not None and self.expires_at < fim:
+            fim = self.expires_at
+        self.expires_at = fim
+        return fim
+
+    def dias_para_vencer(self, now: datetime | None = None) -> int | None:
+        """Quantos dias faltam. None quando não tem validade definida."""
+        if self.expires_at is None or self.is_revoked:
+            return None
+        return (self.expires_at - (now or utcnow())).days
 
     def registrar_uso(self, at: datetime | None = None) -> None:
         self.last_used_at = at or utcnow()

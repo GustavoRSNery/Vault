@@ -303,3 +303,55 @@ class TestComparacaoEmTempoConstante:
             assert " == " not in fonte.split("return")[-1], (
                 f"{nome} parece comparar com '==' — use compare_digest."
             )
+
+
+class TestGracaNaRenovacao:
+    """A credencial antiga não morre na hora da renovação.
+
+    Matar na hora derrubaria um robô que esteja no meio de um ciclo com a
+    credencial velha em memória — e a rotação existe para evitar incidente,
+    não para causar um. O prazo é curto de propósito: graça longa é
+    credencial velha viva.
+    """
+
+    def test_graca_mantem_a_antiga_valida_por_alguns_minutos(self) -> None:
+        app = _app()
+        sid, _ = _secret_id(app)
+
+        fim = sid.aposentar_com_graca(minutos=10, now=AGORA)
+        assert fim == AGORA + timedelta(minutes=10)
+        assert sid.is_valid(AGORA + timedelta(minutes=5)) is True
+        assert sid.is_valid(AGORA + timedelta(minutes=11)) is False
+
+    def test_graca_nao_estica_validade_ja_vencida(self) -> None:
+        """A graça não pode ressuscitar uma credencial que já ia expirar."""
+        app = _app()
+        sid, _ = _secret_id(app, expires_at=AGORA + timedelta(minutes=2))
+
+        fim = sid.aposentar_com_graca(minutos=60, now=AGORA)
+        assert fim == AGORA + timedelta(minutes=2)
+        assert sid.is_valid(AGORA + timedelta(minutes=30)) is False
+
+    def test_revogada_nao_recebe_graca(self) -> None:
+        app = _app()
+        sid, _ = _secret_id(app)
+        sid.revoke(AGORA)
+        with pytest.raises(ConflictError):
+            sid.aposentar_com_graca(now=AGORA)
+
+    def test_dias_para_vencer(self) -> None:
+        app = _app()
+        sid, _ = _secret_id(app, expires_at=AGORA + timedelta(days=45))
+        assert sid.dias_para_vencer(AGORA) == 45
+
+    def test_sem_validade_nao_tem_dias(self) -> None:
+        app = _app()
+        sid, _ = _secret_id(app)
+        assert sid.dias_para_vencer(AGORA) is None
+
+    def test_revogada_nao_tem_dias(self) -> None:
+        """Revogada não "vence": já acabou."""
+        app = _app()
+        sid, _ = _secret_id(app, expires_at=AGORA + timedelta(days=45))
+        sid.revoke(AGORA)
+        assert sid.dias_para_vencer(AGORA) is None
