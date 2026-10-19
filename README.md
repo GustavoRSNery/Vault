@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**47 das 57 telas** do inventário de arquitetura, **61 endpoints**, **484
+**48 das 57 telas** do inventário de arquitetura, **61 endpoints**, **484
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 

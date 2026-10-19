@@ -52,11 +52,11 @@ ESTADO = {
     "Fila de aprovação": ("EMBUTIDA", "seção em /solicitacoes"),
     "Detalhe da solicitação": ("EMBUTIDA", "cartão de decisão em /solicitacoes"),
     # Acesso de aplicacao (fase 2)
-    "Aplicações": ("ABERTA", "fase 2 — acesso de máquina"),
-    "Detalhe da aplicação": ("ABERTA", "fase 2"),
-    "Credenciais AppRole": ("ABERTA", "fase 2"),
-    "Tokens e leases": ("ABERTA", "fase 2"),
-    "Consumo": ("ABERTA", "fase 2"),
+    "Aplicações": ("PAGINA", "/admin/aplicacoes"),
+    "Detalhe da aplicação": ("EMBUTIDA", "painel expansível em /admin/aplicacoes"),
+    "Credenciais AppRole": ("EMBUTIDA", "emissão e revogação em /admin/aplicacoes"),
+    "Tokens e leases": ("EMBUTIDA", "acessos em uso, com encerrar-todos"),
+    "Consumo": ("EMBUTIDA", "contador de leituras por lease; por segredo em aberto"),
     # Certificados
     "Certificados": ("PAGINA", "/certificados"),
     "Detalhe/upload": ("EMBUTIDA", "formulário em /certificados"),

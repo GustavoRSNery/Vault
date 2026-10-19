@@ -6,6 +6,49 @@ código já conta o quê.
 
 ---
 
+## 2026-10-19 — Acesso de máquina para RPAs (fase 2)
+
+**Decidi:** AppRole (`role_id` público + `secret_id` segredo) com leases
+curtos, em vez de dar ao robô uma conta de usuário.
+**Porque:** usuário-robô é conta de pessoa sem pessoa — ninguém desliga quando
+o robô é aposentado, e a auditoria não distingue de gente. Separar os dois
+fatores permite rotacionar a credencial sem deploy.
+**Descartei:** token permanente por aplicação (é a senha eterna no código com
+outro nome).
+
+**Decidi também:** a aplicação recebe política pelo mesmo mecanismo das
+pessoas, via papel.
+**Porque:** um sistema de permissão paralelo só para robôs é o que ninguém
+lembraria de revisar. A primeira versão usava convenção de nome de política,
+que quebraria em silêncio num rename — trocado por vínculo explícito.
+
+**Feito:** domínio `machines`, 3 tabelas, 7 endpoints e a tela de Aplicações
+com emissão de credencial, acessos em uso e botão de encerrar todos.
+
+**Validado:** 484 testes em SQLite e Postgres. No ambiente real, 10 etapas do
+ciclo de um RPA: cadastrar, emitir, autenticar, ler no escopo, recusar fora
+dele, recusar o negado, mensagens idênticas para credencial errada e role_id
+inexistente, encerrar acessos, e a trilha registrando `maquina:<nome>` como
+ator sem `actor_id`.
+**Commit:** `85eb6ce` Acesso de máquina para RPAs: AppRole e leases
+
+**Surpresa (duas):**
+
+1. **GRAVE** — o lease descartava as regras `deny` ao montar o escopo. Com
+   `allow` em `cofres/contabil/*` e `deny` em `token-sefaz`, o robô LIA o
+   token-sefaz: tinha mais acesso que a pessoa a quem a mesma política se
+   aplica. Só apareceu validando no ambiente com a política real da
+   contadora; os testes usavam políticas só de allow ou só de deny. O lease
+   agora carrega as negações.
+2. A API informava `papel: null` com o vínculo persistido certo — bug de
+   exibição que faria diagnosticar o problema errado.
+
+Dois mutantes sobreviveram e apontaram lacunas reais: nenhum teste cobria
+aplicação com `deny`, e `compare_digest` vs `==` não é distinguível por teste
+funcional (a diferença é temporal). O segundo virou teste estrutural.
+
+---
+
 ## 2026-10-19 — Quórum Shamir para desselar
 
 **Decidi:** os quinhões protegem um **token de desselagem**, não a chave-mestra.
@@ -177,8 +220,9 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
 - [ ] **Recuperação de senha e convite de usuário** — **BLOQUEADO:** exige
       envio de e-mail (SES ou equivalente).
 - [ ] **Regras de notificação** — **BLOQUEADO:** exige canal de envio.
-- [ ] **Fase 2: acesso de máquina para RPAs** — AppRole, leases, consumo.
-      5 telas do inventário.
+- [ ] **Consumo por segredo** — hoje o lease conta leituras no total; saber
+      *qual* segredo cada robô mais lê ajuda a enxugar escopo. Pequeno.
+- [ ] **Rotação automática do secret_id** — hoje é emitir/revogar à mão.
 - [ ] **Fase 3: gravação de sessão** — 3 telas. Escopo grande, avaliar se vale.
 - [ ] **Configurações na interface** — prazos e retenção hoje por variável de
       ambiente. Baixo valor enquanto o sistema tem um administrador só.
