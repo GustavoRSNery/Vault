@@ -658,3 +658,434 @@ class TestNegacaoVenceNoLease:
             )
         ).one()
         assert "token-sefaz" in evento.target_path
+
+
+class TestConsumo:
+    """Consumo derivado da trilha, não de contador próprio.
+
+    O campo que justifica a tela é `nunca_lidos`: caminho concedido que o robô
+    nunca leu é escopo a enxugar. Permissão que ninguém usa é só superfície de
+    ataque esperando um comprometimento.
+    """
+
+    def _preparar(
+        self, client: TestClient, headers: dict[str, str], usuario: UserModel,
+        db: Session,
+    ) -> str:
+        conceder(db, usuario, "cofres/*", TODAS, nome_politica="p-cofres")
+        conceder(db, usuario, "aplicacoes", TODAS, nome_politica="p-apps")
+        _cenario(client, headers)
+        client.post(
+            "/api/v1/cofres/contabil/segredos",
+            headers=headers,
+            json={"name": "outro-segredo", "value": "valor-qualquer"},
+        )
+
+        politica = PolicyModel(name="pol-rpa-consumo", description="")
+        politica.rules = [
+            PolicyRuleModel(
+                path="cofres/contabil/*",
+                capabilities=["read", "reveal"],
+                effect="allow",
+            ),
+            PolicyRuleModel(
+                path="cofres/rh/*", capabilities=["read", "reveal"], effect="allow"
+            ),
+        ]
+        papel = RoleModel(name="rpa-consumo", description="")
+        papel.policies.append(politica)
+        db.add_all([politica, papel])
+        db.commit()
+
+        criada = client.post(
+            "/api/v1/aplicacoes",
+            headers=headers,
+            json={
+                "name": "rpa-consumo", "display_name": "RPA Consumo",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-consumo",
+            },
+        )
+        credencial = client.post(
+            "/api/v1/aplicacoes/rpa-consumo/credenciais", headers=headers, json={}
+        )
+        lease = client.post(
+            "/api/v1/maquina/autenticar",
+            json={
+                "role_id": criada.json()["role_id"],
+                "secret_id": credencial.json()["secret_id"],
+            },
+        )
+        return lease.json()["token"]
+
+    def test_conta_leituras_por_caminho(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        token = self._preparar(client, autenticado, usuario, db_session)
+        cabecalho = {"Authorization": f"Bearer {token}"}
+
+        for _ in range(3):
+            client.post(
+                "/api/v1/maquina/segredo",
+                headers=cabecalho,
+                json={"cofre": "contabil", "segredo": "dominio-escrita"},
+            )
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers=cabecalho,
+            json={"cofre": "contabil", "segredo": "outro-segredo"},
+        )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-consumo/consumo", headers=autenticado
+        )
+        assert consumo.status_code == 200
+        lidos = {
+            linha["caminho"]: linha["leituras"] for linha in consumo.json()["lidos"]
+        }
+        assert lidos["cofres/contabil/segredos/dominio-escrita"] == 3
+        assert lidos["cofres/contabil/segredos/outro-segredo"] == 1
+
+    def test_ordena_do_mais_lido_ao_menos(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        token = self._preparar(client, autenticado, usuario, db_session)
+        cabecalho = {"Authorization": f"Bearer {token}"}
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers=cabecalho,
+            json={"cofre": "contabil", "segredo": "outro-segredo"},
+        )
+        for _ in range(4):
+            client.post(
+                "/api/v1/maquina/segredo",
+                headers=cabecalho,
+                json={"cofre": "contabil", "segredo": "dominio-escrita"},
+            )
+
+        lidos = client.get(
+            "/api/v1/aplicacoes/rpa-consumo/consumo", headers=autenticado
+        ).json()["lidos"]
+        assert [linha["leituras"] for linha in lidos] == [4, 1]
+
+    def test_escopo_nunca_usado_aparece(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """O campo que justifica a tela: permissão concedida e nunca usada."""
+        token = self._preparar(client, autenticado, usuario, db_session)
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"cofre": "contabil", "segredo": "dominio-escrita"},
+        )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-consumo/consumo", headers=autenticado
+        ).json()
+
+        # O escopo tem contábil e RH; só o contábil foi usado.
+        assert "cofres/rh/*" in consumo["caminhos_no_escopo"]
+        assert consumo["nunca_lidos"] == ["cofres/rh/*"]
+
+    def test_caminho_usado_sai_de_nunca_lidos(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        token = self._preparar(client, autenticado, usuario, db_session)
+        cabecalho = {"Authorization": f"Bearer {token}"}
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers=cabecalho,
+            json={"cofre": "contabil", "segredo": "dominio-escrita"},
+        )
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers=cabecalho,
+            json={"cofre": "rh", "segredo": "folha"},
+        )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-consumo/consumo", headers=autenticado
+        ).json()
+        assert consumo["nunca_lidos"] == []
+
+    def test_negativas_aparecem_separadas(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """Caminho negado com frequência é escopo mal dimensionado."""
+        token = self._preparar(client, autenticado, usuario, db_session)
+        cabecalho = {"Authorization": f"Bearer {token}"}
+        for _ in range(2):
+            client.post(
+                "/api/v1/maquina/segredo",
+                headers=cabecalho,
+                json={"cofre": "infraestrutura", "segredo": "x"},
+            )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-consumo/consumo", headers=autenticado
+        ).json()
+        assert len(consumo["negados"]) >= 1
+        assert consumo["lidos"] == []
+
+    def test_consumo_nao_mistura_aplicacoes(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """Cada robô responde pelo seu: misturar inutilizaria a análise."""
+        token = self._preparar(client, autenticado, usuario, db_session)
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"cofre": "contabil", "segredo": "dominio-escrita"},
+        )
+
+        politica = PolicyModel(name="pol-rpa-dois", description="")
+        politica.rules = [
+            PolicyRuleModel(
+                path="cofres/contabil/*", capabilities=["reveal"], effect="allow"
+            )
+        ]
+        papel = RoleModel(name="rpa-dois", description="")
+        papel.policies.append(politica)
+        db_session.add_all([politica, papel])
+        db_session.commit()
+        client.post(
+            "/api/v1/aplicacoes",
+            headers=autenticado,
+            json={
+                "name": "rpa-dois", "display_name": "Dois",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-dois",
+            },
+        )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-dois/consumo", headers=autenticado
+        ).json()
+        assert consumo["lidos"] == []
+
+    def test_leitura_de_pessoa_nao_entra_no_consumo_da_maquina(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """O ator é o robô; leitura humana no mesmo caminho não conta."""
+        self._preparar(client, autenticado, usuario, db_session)
+        client.post(
+            "/api/v1/cofres/contabil/segredos/dominio-escrita/revelar",
+            headers=autenticado,
+        )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-consumo/consumo", headers=autenticado
+        ).json()
+        assert consumo["lidos"] == []
+
+    def test_sem_admin_nao_ve_consumo(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        conceder(db_session, usuario, "cofres/*", TODAS)
+        assert client.get(
+            "/api/v1/aplicacoes/qualquer/consumo", headers=autenticado
+        ).status_code == 403
+
+
+class TestOrdemDasChecagens:
+    """O escopo é checado antes de resolver o cofre.
+
+    Descoberto escrevendo o teste de consumo: resolver o cofre primeiro fazia
+    a resposta distinguir "cofre não existe" (404) de "fora do seu escopo"
+    (403). Um robô comprometido mapearia todos os cofres da empresa pela
+    mensagem de erro, sem ter permissão para ler nenhum deles.
+    """
+
+    def test_cofre_inexistente_e_fora_do_escopo_respondem_igual(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        token = TestCicloCompleto()._preparar(
+            client, autenticado, usuario, db_session
+        )
+        cabecalho = {"Authorization": f"Bearer {token}"}
+
+        # Cofre que EXISTE, mas está fora do escopo do lease.
+        existente = client.post(
+            "/api/v1/maquina/segredo",
+            headers=cabecalho,
+            json={"cofre": "rh", "segredo": "folha"},
+        )
+        # Cofre que NÃO existe.
+        inventado = client.post(
+            "/api/v1/maquina/segredo",
+            headers=cabecalho,
+            json={"cofre": "inventado", "segredo": "qualquer"},
+        )
+
+        assert existente.status_code == inventado.status_code == 403, (
+            "respostas diferentes permitiriam mapear os cofres existentes "
+            "pela mensagem de erro"
+        )
+        assert (
+            existente.json()["erro"]["mensagem"]
+            == inventado.json()["erro"]["mensagem"]
+        )
+
+    def test_tentativa_em_cofre_inexistente_tambem_fica_na_trilha(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """Varredura de nomes de cofre é sinal que a revisão quer encontrar."""
+        token = TestCicloCompleto()._preparar(
+            client, autenticado, usuario, db_session
+        )
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"cofre": "varredura", "segredo": "x"},
+        )
+
+        eventos = db_session.scalars(
+            select(AuditEventModel).where(
+                AuditEventModel.action == "acesso_negado",
+                AuditEventModel.actor_label == "maquina:rpa-fiscal",
+            )
+        ).all()
+        assert any("varredura" in e.target_path for e in eventos)
+
+
+class TestNuncaLidosSemFalsoPositivo:
+    """Um caminho sem curinga não pode aparecer como "nunca lido" quando o
+    que foi lido está SOB ele.
+
+    Descoberto validando no ambiente: a política concede `cofres/contabil` e
+    `cofres/contabil/*`; as leituras acontecem em
+    `cofres/contabil/segredos/x`. O primeiro padrão casa só com o caminho
+    exato, então aparecia como nunca usado — um alerta mandando enxugar
+    escopo em uso. Alerta falso é pior que alerta nenhum: ensina a ignorar
+    o aviso.
+    """
+
+    def _preparar(
+        self, client: TestClient, headers: dict[str, str], usuario: UserModel,
+        db: Session,
+    ) -> str:
+        conceder(db, usuario, "cofres/*", TODAS, nome_politica="p-cofres")
+        conceder(db, usuario, "aplicacoes", TODAS, nome_politica="p-apps")
+        _cenario(client, headers)
+
+        # A forma real: o cofre E o curinga sob ele.
+        politica = PolicyModel(name="pol-rpa-exato", description="")
+        politica.rules = [
+            PolicyRuleModel(
+                path="cofres/contabil",
+                capabilities=["read", "list"],
+                effect="allow",
+            ),
+            PolicyRuleModel(
+                path="cofres/contabil/*",
+                capabilities=["read", "reveal"],
+                effect="allow",
+            ),
+        ]
+        papel = RoleModel(name="rpa-exato", description="")
+        papel.policies.append(politica)
+        db.add_all([politica, papel])
+        db.commit()
+
+        criada = client.post(
+            "/api/v1/aplicacoes",
+            headers=headers,
+            json={
+                "name": "rpa-exato", "display_name": "Exato",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-exato",
+            },
+        )
+        credencial = client.post(
+            "/api/v1/aplicacoes/rpa-exato/credenciais", headers=headers, json={}
+        )
+        lease = client.post(
+            "/api/v1/maquina/autenticar",
+            json={
+                "role_id": criada.json()["role_id"],
+                "secret_id": credencial.json()["secret_id"],
+            },
+        )
+        return lease.json()["token"]
+
+    def test_cofre_com_leitura_dentro_nao_e_nunca_lido(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        token = self._preparar(client, autenticado, usuario, db_session)
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"cofre": "contabil", "segredo": "dominio-escrita"},
+        )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-exato/consumo", headers=autenticado
+        ).json()
+
+        assert "cofres/contabil" in consumo["caminhos_no_escopo"]
+        assert consumo["nunca_lidos"] == [], (
+            "o cofre apareceu como nunca lido apesar das leituras dentro dele"
+        )
+
+    def test_escopo_de_fato_nao_usado_continua_aparecendo(
+        self, client: TestClient, autenticado: dict[str, str], usuario: UserModel,
+        db_session: Session,
+    ) -> None:
+        """A correção não pode engolir o alerta de verdade."""
+        conceder(db_session, usuario, "cofres/*", TODAS, nome_politica="p-cofres")
+        conceder(db_session, usuario, "aplicacoes", TODAS, nome_politica="p-apps")
+        _cenario(client, autenticado)
+
+        politica = PolicyModel(name="pol-rpa-largo", description="")
+        politica.rules = [
+            PolicyRuleModel(
+                path="cofres/contabil/*",
+                capabilities=["read", "reveal"],
+                effect="allow",
+            ),
+            PolicyRuleModel(
+                path="cofres/rh", capabilities=["read", "list"], effect="allow"
+            ),
+        ]
+        papel = RoleModel(name="rpa-largo", description="")
+        papel.policies.append(politica)
+        db_session.add_all([politica, papel])
+        db_session.commit()
+
+        criada = client.post(
+            "/api/v1/aplicacoes",
+            headers=autenticado,
+            json={
+                "name": "rpa-largo", "display_name": "Largo",
+                "owner_label": "ti@exemplo.com.br", "papel": "rpa-largo",
+            },
+        )
+        credencial = client.post(
+            "/api/v1/aplicacoes/rpa-largo/credenciais", headers=autenticado, json={}
+        )
+        lease = client.post(
+            "/api/v1/maquina/autenticar",
+            json={
+                "role_id": criada.json()["role_id"],
+                "secret_id": credencial.json()["secret_id"],
+            },
+        )
+        client.post(
+            "/api/v1/maquina/segredo",
+            headers={"Authorization": f"Bearer {lease.json()['token']}"},
+            json={"cofre": "contabil", "segredo": "dominio-escrita"},
+        )
+
+        consumo = client.get(
+            "/api/v1/aplicacoes/rpa-largo/consumo", headers=autenticado
+        ).json()
+        # O RH foi concedido e nunca tocado: o alerta precisa aparecer.
+        assert consumo["nunca_lidos"] == ["cofres/rh"]

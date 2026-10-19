@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**48 das 57 telas** do inventário de arquitetura, **61 endpoints**, **484
+**48 das 57 telas** do inventário de arquitetura, **62 endpoints**, **496
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 
@@ -28,7 +28,7 @@ e conferidos no navegador.
 | Trilha de auditoria encadeada, **exportada e ancorada** | Destino inviolável de verdade (hoje é arquivo local) |
 | Selar e desselar cofre, **com quórum Shamir** | — |
 
-| **Acesso de máquina para RPAs** (AppRole, leases, consumo) | Rotação automática do secret_id |
+| **Acesso de máquina para RPAs** (AppRole, leases, consumo por segredo) | Rotação automática do secret_id |
 
 Fora do escopo entregue: gravação de sessão e integrações (SES, WhatsApp,
 LDAP) são fase 3.

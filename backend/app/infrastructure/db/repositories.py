@@ -415,6 +415,68 @@ class AuditRepository:
     def count(self) -> int:
         return self._session.scalar(select(func.count()).select_from(AuditEventModel)) or 0
 
+    def consumo_por_ator(
+        self, actor_label: str, *, desde: datetime | None = None
+    ) -> list[tuple[str, int, datetime]]:
+        """Quantas leituras este ator fez, por caminho.
+
+        Derivado da trilha, nao de contador proprio: a trilha ja e a fonte de
+        verdade do que foi lido, e um contador paralelo divergiria dela no
+        primeiro erro de escrita.
+
+        Devolve (caminho, quantidade, ultima_leitura), do mais lido ao menos.
+        """
+        consulta = (
+            select(
+                AuditEventModel.target_path,
+                func.count().label("quantas"),
+                func.max(AuditEventModel.occurred_at).label("ultima"),
+            )
+            .where(
+                AuditEventModel.actor_label == actor_label,
+                AuditEventModel.action == str(AuditAction.SECRET_REVEALED),
+                AuditEventModel.outcome == str(AuditOutcome.SUCCESS),
+            )
+            .group_by(AuditEventModel.target_path)
+            .order_by(func.count().desc())
+        )
+        if desde is not None:
+            consulta = consulta.where(AuditEventModel.occurred_at >= desde)
+
+        return [
+            (linha.target_path, linha.quantas, _aware(linha.ultima))
+            for linha in self._session.execute(consulta).all()
+        ]
+
+    def negados_por_ator(
+        self, actor_label: str, *, desde: datetime | None = None
+    ) -> list[tuple[str, int, datetime]]:
+        """O que este ator TENTOU ler e nao pôde.
+
+        Tao importante quanto o consumo: caminho negado com frequencia e
+        escopo mal dimensionado — ou robo pedindo o que nao deveria.
+        """
+        consulta = (
+            select(
+                AuditEventModel.target_path,
+                func.count().label("quantas"),
+                func.max(AuditEventModel.occurred_at).label("ultima"),
+            )
+            .where(
+                AuditEventModel.actor_label == actor_label,
+                AuditEventModel.action == str(AuditAction.ACCESS_DENIED),
+            )
+            .group_by(AuditEventModel.target_path)
+            .order_by(func.count().desc())
+        )
+        if desde is not None:
+            consulta = consulta.where(AuditEventModel.occurred_at >= desde)
+
+        return [
+            (linha.target_path, linha.quantas, _aware(linha.ultima))
+            for linha in self._session.execute(consulta).all()
+        ]
+
     def anchors(self) -> list[ChainAnchor]:
         models = self._session.scalars(
             select(AuditAnchorModel).order_by(AuditAnchorModel.sequence)

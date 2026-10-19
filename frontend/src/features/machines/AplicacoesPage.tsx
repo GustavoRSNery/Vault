@@ -52,6 +52,17 @@ type Lease = {
   minutos_restantes: number | null
 }
 
+type LinhaConsumo = { caminho: string; leituras: number; ultima: string }
+
+type Consumo = {
+  aplicacao: string
+  dias: number
+  lidos: LinhaConsumo[]
+  negados: LinhaConsumo[]
+  caminhos_no_escopo: string[]
+  nunca_lidos: string[]
+}
+
 type Papel = { id: string; name: string; policies: string[] }
 
 export function AplicacoesPage() {
@@ -417,6 +428,11 @@ function DetalheAplicacao({
     queryFn: () => request<Lease[]>(`/aplicacoes/${encodeURIComponent(nome)}/leases`),
   })
 
+  const { data: consumo } = useQuery({
+    queryKey: ['consumo', nome],
+    queryFn: () => request<Consumo>(`/aplicacoes/${encodeURIComponent(nome)}/consumo`),
+  })
+
   const emitir = useMutation({
     mutationFn: () =>
       request<CredencialEmitida>(
@@ -608,6 +624,95 @@ function DetalheAplicacao({
           )}
         </div>
       </Card>
+
+      {consumo && <CartaoConsumo consumo={consumo} />}
     </>
+  )
+}
+
+function CartaoConsumo({ consumo }: { consumo: Consumo }) {
+  return (
+    <Card titulo={`Consumo nos últimos ${consumo.dias} dias`}>
+      <div className="col" style={{ gap: 16 }}>
+        <p className="sub" style={{ margin: 0 }}>
+          Derivado da trilha de auditoria, não de um contador próprio — duas
+          fontes do mesmo número divergem na primeira falha de escrita.
+        </p>
+
+        {consumo.nunca_lidos.length > 0 && (
+          <Alerta tom="warning">
+            Este robô tem acesso a {consumo.nunca_lidos.join(', ')} e nunca leu
+            nada ali. Permissão que ninguém usa é só superfície de ataque
+            esperando um comprometimento — vale enxugar o escopo.
+          </Alerta>
+        )}
+
+        <div className="col" style={{ gap: 8 }}>
+          <span className="help" style={{ fontWeight: 600 }}>
+            Mais lidos
+          </span>
+          {consumo.lidos.length === 0 ? (
+            <span className="muted">Nenhuma leitura no período.</span>
+          ) : (
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Caminho</th>
+                    <th>Leituras</th>
+                    <th>Última</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consumo.lidos.map((l) => (
+                    <tr key={l.caminho}>
+                      <td>
+                        <code className="secret-sm">{l.caminho}</code>
+                      </td>
+                      <td className="secret-sm strong">{l.leituras}</td>
+                      <td className="muted">{formatarDataHora(l.ultima)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {consumo.negados.length > 0 && (
+          <div className="col" style={{ gap: 8 }}>
+            <span className="help" style={{ fontWeight: 600 }}>
+              Tentou e não pôde
+            </span>
+            <span className="help">
+              Caminho negado com frequência é escopo mal dimensionado — ou robô
+              pedindo o que não deveria.
+            </span>
+            <div className="tbl-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Caminho</th>
+                    <th>Tentativas</th>
+                    <th>Última</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consumo.negados.map((l) => (
+                    <tr key={l.caminho}>
+                      <td>
+                        <code className="secret-sm">{l.caminho}</code>
+                      </td>
+                      <td className="secret-sm strong">{l.leituras}</td>
+                      <td className="muted">{formatarDataHora(l.ultima)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }

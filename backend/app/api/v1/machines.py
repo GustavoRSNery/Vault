@@ -16,7 +16,7 @@ import hashlib
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -159,6 +159,28 @@ class LeaseResponse(BaseModel):
     leituras: int
     ativo: bool
     minutos_restantes: float | None
+
+
+class LinhaConsumo(BaseModel):
+    caminho: str
+    leituras: int
+    ultima: datetime
+
+
+class ConsumoResponse(BaseModel):
+    """O que a aplicação leu, e o que tentou ler sem conseguir.
+
+    As duas listas importam. Só a de leituras diria qual escopo está em uso;
+    a de negativas diz onde o escopo está mal dimensionado — ou onde um robô
+    pede o que não deveria, que é o sinal que uma revisão procura.
+    """
+
+    aplicacao: str
+    dias: int
+    lidos: list[LinhaConsumo]
+    negados: list[LinhaConsumo]
+    caminhos_no_escopo: list[str]
+    nunca_lidos: list[str]
 
 
 class LerSegredoRequest(BaseModel):
@@ -478,6 +500,82 @@ def listar_leases(
     ]
 
 
+@router.get(
+    "/aplicacoes/{nome}/consumo",
+    response_model=ConsumoResponse,
+    summary="O que a aplicação leu",
+)
+def consumo_da_aplicacao(
+    nome: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    apps: Annotated[ApplicationRepository, Depends(get_applications)],
+    leases: Annotated[LeaseRepository, Depends(get_leases)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+    dias: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> ConsumoResponse:
+    """Consumo derivado da trilha, não de um contador próprio.
+
+    A trilha já é a fonte de verdade do que foi lido; um contador paralelo
+    divergiria dela no primeiro erro de escrita.
+
+    `nunca_lidos` é o que justifica a tela: caminho no escopo que o robô nunca
+    leu é escopo a enxugar. Permissão que ninguém usa é só superfície de
+    ataque esperando um comprometimento.
+    """
+    _exigir_admin(current, policies, audit, db, "ver consumo")
+    app = apps.get_by_name(Slug(nome))
+
+    from datetime import timedelta
+
+    from ...domain.shared.value_objects import utcnow
+
+    desde = utcnow() - timedelta(days=dias)
+    rotulo = f"maquina:{app.name}"
+
+    lidos = audit.consumo_por_ator(rotulo, desde=desde)
+    negados = audit.negados_por_ator(rotulo, desde=desde)
+
+    # O escopo é o do último lease emitido: é o que vale hoje para o robô.
+    historico = leases.list_for_application(app.id)
+    escopo = historico[0].caminhos if historico else []
+
+    # Caminho concedido que nunca apareceu numa leitura.
+    #
+    # Um padrão sem curinga (`cofres/contabil`) casa só com o caminho exato,
+    # e segredos vivem em `cofres/contabil/segredos/x`. Sem tratar isso, o
+    # cofre apareceria como "nunca lido" mesmo com todas as leituras dentro
+    # dele — um alerta mandando enxugar escopo em uso, que é pior do que não
+    # alertar: ensina a ignorar o aviso.
+    lidos_set = {caminho for caminho, _, _ in lidos}
+
+    def _alcancou(padrao: str) -> bool:
+        alvo = PolicyPath(padrao)
+        if any(alvo.matches(PolicyPath(c)) for c in lidos_set):
+            return True
+        if alvo.has_wildcard:
+            return False
+        # Sem curinga: conta também o que foi lido SOB este caminho.
+        prefixo = f"{padrao}/"
+        return any(c.startswith(prefixo) for c in lidos_set)
+
+    nunca = [padrao for padrao in escopo if not _alcancou(padrao)]
+
+    return ConsumoResponse(
+        aplicacao=str(app.name),
+        dias=dias,
+        lidos=[
+            LinhaConsumo(caminho=c, leituras=q, ultima=u) for c, q, u in lidos
+        ],
+        negados=[
+            LinhaConsumo(caminho=c, leituras=q, ultima=u) for c, q, u in negados
+        ],
+        caminhos_no_escopo=escopo,
+        nunca_lidos=nunca,
+    )
+
+
 # ------------------------------------------------- o que o robô de fato usa
 
 
@@ -607,9 +705,14 @@ def ler_segredo(
     if lease is None or not lease.is_active():
         raise AuthenticationError("Lease inválido ou expirado.")
 
-    cofre = vaults.get_by_name(Slug(payload.cofre))
+    # O escopo é checado ANTES de resolver o cofre, de propósito: resolver
+    # primeiro faria a resposta distinguir "cofre não existe" de "fora do seu
+    # escopo", e um robô comprometido mapearia os cofres pela mensagem de erro
+    # sem ter permissão nenhuma.
     nome_segredo = Slug(payload.segredo)
-    caminho = cofre.secret_path(nome_segredo)
+    caminho = PolicyPath(
+        f"cofres/{Slug(payload.cofre)}/segredos/{nome_segredo}"
+    )
 
     if not lease.cobre(caminho, Capability.REVEAL):
         audit.append(
@@ -625,6 +728,7 @@ def ler_segredo(
             "autenticação; reautentique se a política mudou."
         )
 
+    cofre = vaults.get_by_name(Slug(payload.cofre))
     cofre.ensure_usable()
     segredo = secrets.get_in_vault(cofre.id, nome_segredo)
     if segredo.is_deleted:
