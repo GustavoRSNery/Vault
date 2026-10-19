@@ -11,7 +11,7 @@ import base64
 import secrets
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # Chave-mestra (KEK) em base64, 32 bytes. Em produção vem do KMS e este
     # campo fica vazio — o adaptador de KMS não precisa dela em processo.
     master_key_b64: str = ""
+
+    # ARN ou alias da chave no AWS KMS. Preenchido, o KMS passa a ser o
+    # provedor da KEK e `master_key_b64` deixa de ser usada: a chave-mestra
+    # nunca entra neste processo.
+    kms_key_id: str = ""
+    kms_region: str = ""
 
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
@@ -60,6 +66,26 @@ class Settings(BaseSettings):
         if len(raw) != 32:
             raise ValueError("VAULT_MASTER_KEY_B64 deve decodificar para 32 bytes.")
         return value
+
+    @property
+    def usa_kms(self) -> bool:
+        return bool(self.kms_key_id.strip())
+
+    @model_validator(mode="after")
+    def _exigir_kms_em_producao(self) -> "Settings":
+        """Produção não roda com a chave-mestra em memória.
+
+        Com `LocalKeyProvider`, quem lê o processo lê a KEK e decifra o cofre
+        inteiro offline. É aceitável em desenvolvimento e inaceitável em
+        produção — e uma configuração que "funciona" com a chave errada é pior
+        que uma que falha ao subir, porque o erro só aparece no vazamento.
+        """
+        if self.environment == "production" and not self.usa_kms:
+            raise ValueError(
+                "Em produção, defina VAULT_KMS_KEY_ID. A chave-mestra em "
+                "memória expõe todo o cofre a quem ler o processo."
+            )
+        return self
 
     @property
     def master_key(self) -> bytes:

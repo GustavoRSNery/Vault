@@ -9,7 +9,7 @@ do design system do projeto.
 
 ## Estado atual
 
-**43 das 57 telas** do inventário de arquitetura, **49 endpoints**, **340
+**43 das 57 telas** do inventário de arquitetura, **49 endpoints**, **364
 testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
 e conferidos no navegador.
 
@@ -26,7 +26,7 @@ e conferidos no navegador.
 | **Solicitações de acesso temporário**, com concessão que caduca sozinha | — |
 | **Busca global** e **central de alertas**, ambas filtradas por permissão | Regras de notificação (dependem de canal de envio) |
 | Trilha de auditoria encadeada, **exportada e ancorada** | Destino inviolável de verdade (hoje é arquivo local) |
-| Selar e desselar cofre | Selagem via KMS e quórum Shamir |
+| Selar e desselar cofre | Quórum Shamir para desselar |
 
 Fora do escopo entregue, por fase: acesso de máquina para RPAs (AppRole,
 leases, consumo) é fase 2; gravação de sessão e integrações (SES, WhatsApp,
@@ -143,8 +143,43 @@ desfaça sem saber o que elas protegiam.
 
 **Envelope encryption.** Cada segredo recebe uma chave de dados (DEK) própria,
 protegida pela chave-mestra (KEK). A KEK nunca cifra dado diretamente, então
-rotacioná-la não exige reescrever todos os segredos. Em produção a KEK vive no
-KMS; em desenvolvimento, uma chave local atrás da mesma interface.
+rotacioná-la não exige reescrever todos os segredos.
+
+A diferença entre os dois provedores de KEK não é de implementação, é de
+**modelo de ameaça**. Com `LocalKeyProvider`, quem lê o processo lê a chave e
+decifra o cofre inteiro offline. Com o KMS, a chave-mestra nunca entra no
+processo: ele embrulha e desembrulha a DEK do lado dele. Então um dump do
+banco sozinho não vale nada, cada desproteção vira linha no CloudTrail (dá
+para detectar um cofre sendo drenado), e revogar acesso é mudar política, sem
+tocar nos dados.
+
+Por isso a fronteira é `wrap`/`unwrap` e não "me dê a chave" — a segunda forma
+não teria como ser implementada pelo KMS.
+
+```bash
+pip install -e ".[kms]"
+export VAULT_KMS_KEY_ID=alias/vault-prod
+export VAULT_KMS_REGION=sa-east-1
+```
+
+**Produção recusa subir sem KMS.** `environment=production` sem
+`VAULT_KMS_KEY_ID` é erro de configuração, não detalhe: uma configuração que
+"funciona" com a chave no processo é pior que uma que falha ao subir, porque
+o erro só apareceria no vazamento.
+
+**Rotação de KEK.** É o que o envelope torna barato:
+
+```bash
+python -m app.tools.rotacionar_kek --conferir
+python -m app.tools.rotacionar_kek --nova-chave <base64>
+python -m app.tools.rotacionar_kek --kms <arn-ou-alias>
+```
+
+Desembrulha cada DEK com a chave antiga e reembrulha com a nova; **o texto
+cifrado dos segredos não é tocado**. O `key_id` gravado em cada versão vem da
+impressão digital do material da chave, não de um nome — assim "já
+rotacionado" é uma afirmação verdadeira, e a operação é retomável se for
+interrompida.
 
 **Negação vence.** Na avaliação de política, uma regra `deny` derruba qualquer
 `allow`, por mais específico que seja. É o que torna a revogação confiável:

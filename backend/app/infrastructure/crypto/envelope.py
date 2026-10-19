@@ -17,6 +17,7 @@ import os
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from ...application.ports.keys import KeyProvider
 from ...domain.shared.errors import ValidationError
 from ...domain.vaults.entities import EncryptedValue
 
@@ -62,21 +63,35 @@ class LocalKeyProvider:
 
 
 class EnvelopeCryptoService:
-    """Implementa a porta CryptoService sobre um provedor de chave-mestra."""
+    """Implementa a porta CryptoService sobre um provedor de chave-mestra.
 
-    def __init__(self, key_provider: LocalKeyProvider) -> None:
+    Aceita qualquer `KeyProvider`: a chave local de desenvolvimento ou o KMS.
+    O tipo é a porta, não a implementação — senão trocar de provedor exigiria
+    mexer aqui, que é exatamente o que a porta existe para evitar.
+    """
+
+    def __init__(self, key_provider: KeyProvider) -> None:
         self._keys = key_provider
 
     def encrypt(self, plaintext: str) -> EncryptedValue:
         if not plaintext:
             raise ValidationError("Não há valor para cifrar.")
-        dek = AESGCM.generate_key(bit_length=256)
+
+        # O KMS gera a DEK já protegida numa única chamada; gerar local e
+        # embrulhar depois custaria duas idas à rede por segredo criado.
+        gerar = getattr(self._keys, "generate_dek", None)
+        if gerar is not None:
+            dek, wrapped_dek = gerar()
+        else:
+            dek = AESGCM.generate_key(bit_length=256)
+            wrapped_dek = self._keys.wrap(dek)
+
         nonce = os.urandom(NONCE_BYTES)
         ciphertext = AESGCM(dek).encrypt(nonce, plaintext.encode("utf-8"), None)
         return EncryptedValue(
             ciphertext=ciphertext,
             nonce=nonce,
-            wrapped_dek=self._keys.wrap(dek),
+            wrapped_dek=wrapped_dek,
             key_id=self._keys.key_id,
         )
 

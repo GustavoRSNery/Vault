@@ -19,6 +19,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# boto3 e opcional: so quem usa o AWS KMS como provedor de chave precisa dele.
+# Quem roda local com LocalKeyProvider nao instala, e o import e tardio para
+# que a ausencia nao quebre nada.
+kms = [
+    "boto3>=1.35",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

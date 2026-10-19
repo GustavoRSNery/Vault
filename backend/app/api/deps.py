@@ -23,6 +23,7 @@ from ..infrastructure.audit.exporters import JsonlExporter
 from ..infrastructure.auth.tokens import TokenService
 from ..infrastructure.auth.totp import TotpService
 from ..infrastructure.crypto.envelope import EnvelopeCryptoService, LocalKeyProvider
+from ..infrastructure.crypto.kms import KmsKeyProvider
 from ..infrastructure.crypto.passwords import Argon2PasswordHasher
 from ..infrastructure.db.models import UserModel
 from ..infrastructure.db.repositories import (
@@ -73,6 +74,17 @@ def get_db(
 def get_crypto(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> EnvelopeCryptoService:
+    """Monta a criptografia sobre o provedor de chave configurado.
+
+    Com `VAULT_KMS_KEY_ID` definido, a chave-mestra nunca entra neste
+    processo: o KMS embrulha e desembrulha a DEK do lado dele. Sem ele, cai
+    na chave local — que só é aceitável fora de produção, e a configuração
+    recusa subir em produção sem KMS.
+    """
+    if settings.usa_kms:
+        return EnvelopeCryptoService(
+            KmsKeyProvider(settings.kms_key_id, region=settings.kms_region or None)
+        )
     return EnvelopeCryptoService(LocalKeyProvider(settings.master_key))
 
 
