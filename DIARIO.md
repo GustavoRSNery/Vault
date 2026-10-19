@@ -6,6 +6,52 @@ código já conta o quê.
 
 ---
 
+## 2026-10-19 — Gravação de sessão (fase 3), em ports and adapters
+
+**Pedido explícito:** fazer agora, com o que depende de externo deixado em
+aberto para conectar, no padrão ports and adapters.
+
+**Decidi:** DUAS portas, não uma — `CapturaDeSessao` e
+`ArmazenamentoDeGravacao`.
+**Porque:** respondem a perguntas diferentes (de onde os eventos vêm × onde a
+gravação fica) e tendem a ter tecnologias diferentes. Juntá-las forçaria quem
+troca o armazenamento a mexer na captura.
+**Descartei:** porta única `GravadorDeSessao`.
+
+**Decidi também:** os esqueletos (`ProxySsh`, `ArmazenamentoS3`) levantam
+`NotImplementedError` em vez de devolver vazio.
+**Porque:** um stub silencioso viraria "a gravação está ligada" numa
+auditoria, e descobrir que não estava é a pior hora para descobrir.
+
+**Decidi ainda:** os adaptadores declaram o que são — `captura_automatica` e
+`imutavel`.
+**Porque:** "gravação completa" e "o que a pessoa anotou" não podem parecer a
+mesma coisa numa investigação. A tela usa a declaração para avisar.
+
+**Feito:** domínio `sessions` (sem saber que SSH existe), 2 portas, 4
+adaptadores (2 funcionando, 2 esboçados), 7 endpoints e as 3 telas do
+inventário — ativas com encerrar/derrubar, histórico pesquisável e player com
+timeline, velocidade e busca que salta para o instante.
+
+**Validado:** 577 testes em SQLite e Postgres, 2 mutantes mortos. No ambiente
+real, 10 etapas: abrir, registrar, recusar escrita alheia, isolar por
+usuário, encerrar e arquivar, recusar evento tardio, reproduzir, buscar
+dentro da gravação, e o admin revisando com rastro na trilha.
+**Commits:** `107e7c3` gravação de sessão; `39275cf` documento de conexão
+
+**Surpresa:** o volume `/gravacoes` nascia de root e o processo sem
+privilégio não conseguia escrever — encerrar sessão dava 500. O Docker só
+herda a propriedade quando o diretório já existe na imagem com o dono certo.
+O mesmo já valia para `/exportacoes`, que funcionava por ter sido criado
+antes; o Dockerfile agora cria as duas antes do `USER`. É o tipo de erro que
+nenhum teste pega, porque só existe no container.
+
+**Para conectar depois:** `docs/conectar-adaptadores.md` lista, para cada
+porta, o que falta concretamente (token, bucket, credencial) e o trecho que
+preenche o método.
+
+---
+
 ## 2026-10-19 — Configurações operacionais pela interface
 
 **Decidi:** expor só os prazos que são decisão operacional, e deixar os
@@ -324,4 +370,6 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
 - [ ] **Recuperação de senha e convite de usuário** — **BLOQUEADO:** exige
       envio de e-mail (SES ou equivalente).
 - [ ] **Regras de notificação** — **BLOQUEADO:** exige canal de envio.
-- [ ] **Fase 3: gravação de sessão** — 3 telas. Escopo grande, avaliar se vale.
+- [ ] **Captura automática por proxy SSH** — a porta está pronta e o
+      esqueleto escrito; falta o servidor intermediário. **BLOQUEADO** só
+      pela infraestrutura, não pelo código. Ver docs/conectar-adaptadores.md.
