@@ -6,6 +6,52 @@ código já conta o quê.
 
 ---
 
+## 2026-10-19 — KMS e rotação de chave-mestra
+
+**Decidi:** implementar o adaptador AWS KMS de verdade (boto3), com testes
+contra um KMS simulado, em vez de deixar só o comentário "em produção vem do
+KMS".
+**Porque:** a porta existia mas o `EnvelopeCryptoService` estava acoplado ao
+tipo concreto — a troca exigiria mexer nele, que é o que a porta evita. E sem
+a rotação, o `key_id` gravado em cada segredo não servia para nada.
+**Descartei:** esperar uma conta AWS. O adaptador é testável com cliente
+simulado, e o que importa é o contrato, não a AWS.
+
+**Decidi também:** produção recusa subir sem `VAULT_KMS_KEY_ID`.
+**Porque:** configuração que "funciona" com a chave no processo é pior que uma
+que falha ao subir — o erro só apareceria no vazamento.
+**Reversível:** se incomodar, é remover o `model_validator` em `config.py`.
+
+**Feito:** porta `KeyProvider`, adaptador `KmsKeyProvider`, seleção por
+configuração e `app.tools.rotacionar_kek` (com `--conferir`, `--nova-chave`
+e `--kms`). boto3 é extra opcional com import tardio.
+
+**Validado:** 364 testes em SQLite e Postgres. Cinco mutantes mortos. No
+ambiente real: rotacionei a KEK, reiniciei a API, e os 7 segredos continuaram
+legíveis com o mesmo conteúdo (sha256 conferido um a um).
+**Commit:** `794a598` KMS como provedor da chave-mestra, com rotação de KEK
+
+**Surpresa:** o `key_id` vinha do nome (`local-dev` → `local-dev-2`), então
+rotacionar de volta para a chave anterior gerava o mesmo identificador e a
+checagem de "já rotacionado" **pulava registros protegidos por outra chave** —
+eles ficariam ilegíveis depois da troca. Só apareceu rotacionando de ida e
+volta no ambiente real; nenhum teste unitário pegaria. Agora o identificador é
+a impressão digital do material.
+
+---
+
+## 2026-10-19 — Skill AFK e este diário
+
+**Decidi:** criar `/afk` com as preferências já estabelecidas, em vez de
+re-perguntar a cada sessão.
+**Porque:** ele pediu para eu decidir por ele e registrar. A skill fixa o que
+já foi decidido (tudo local, commit sem pedir, mutação obrigatória, Postgres
+ao mexer em SQL, validar no navegador, honestidade acima de tela bonita) e a
+regra central: decidir e anotar, nunca perguntar.
+**Commit:** `4e22ec6`
+
+---
+
 ## 2026-10-19 — Exportação da trilha para destino externo
 
 **Decidi:** Exportar com porta (`SiemExporter`) + arquivo local como primeira
@@ -86,9 +132,9 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
 
 ## Em aberto
 
-- [ ] **KMS para a chave-mestra** — hoje a KEK vem de variável de ambiente;
-      em produção deveria vir do KMS, com `LocalKeyProvider` atrás da mesma
-      interface. É o último item estrutural da fase 1.
+- [ ] **Quórum Shamir para desselar cofre** — hoje desselar é ação de um
+      administrador só. Partir a operação entre N pessoas é o que resta da
+      selagem. Não depende de nada externo.
 - [ ] **Destino inviolável de verdade** para a exportação — o arquivo local
       não é (quem tem o disco reescreve os dois lados). Precisa de Splunk HEC,
       CloudWatch ou bucket com Object Lock. **BLOQUEADO:** exige serviço
