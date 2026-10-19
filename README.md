@@ -115,6 +115,19 @@ VAULT_TEST_DATABASE_URL=postgresql+psycopg://user:senha@localhost:5432/vault_tes
   ./.venv/Scripts/python.exe -m pytest tests/ -q
 ```
 
+### Revisão adversarial
+
+A suíte exercita o código isoladamente. Com o sistema no ar, este script
+tenta **furar** as garantias — escalada de privilégio, reescrita da própria
+política, concessão temporária contra `deny`, auto-aprovação, roubo de
+custódia, busca como vetor de descoberta, enumeração de usuário pelo tempo
+de resposta, token de conta desativada e vazamento na trilha:
+
+```bash
+docker compose up -d
+python scripts/revisao_seguranca.py
+```
+
 ## Decisões de segurança
 
 As escolhas abaixo não são óbvias e têm custo; estão aqui para que ninguém as
