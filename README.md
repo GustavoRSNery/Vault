@@ -7,19 +7,30 @@ AES-256-GCM e trilha de auditoria encadeada por hash.
 Construído a partir dos documentos de arquitetura, do inventário de 57 telas e
 do design system do projeto.
 
-## Estado atual — Fase 1 (Fundação)
+## Estado atual
+
+**43 das 57 telas** do inventário de arquitetura, **48 endpoints**, **318
+testes** — verdes em SQLite e em Postgres real, validados com o sistema no ar
+e conferidos no navegador.
+
+`python docs/mapa_telas.py` imprime o cruzamento tela a tela.
 
 | Entregue | Em aberto |
 | --- | --- |
-| Login com senha (Argon2id) e MFA por TOTP, com cadastro em duas etapas | Recuperação de senha, convite de usuário |
-| Cofres, segredos versionados, histórico, lixeira com restauração | Rotação automática, custódia/check-out |
-| RBAC por caminho, com negação tendo precedência | Editor de políticas na interface |
+| Login (Argon2id) e MFA por TOTP, com cadastro em duas etapas | Recuperação de senha e convite (dependem de envio de e-mail) |
+| Cofres, segredos versionados, histórico, lixeira com restauração | — |
+| RBAC por caminho, negação com precedência, **editor com simulador** | — |
+| **Pessoas, papéis e políticas** pela interface | Grupos como entidade própria |
+| **Dispositivos, credenciais com rotação e custódia exclusiva** | Rotação automática (hoje é registro manual) |
+| **Certificados com faixas de expiração** | Upload do arquivo do certificado |
+| **Solicitações de acesso temporário**, com concessão que caduca sozinha | — |
+| **Busca global** e **central de alertas**, ambas filtradas por permissão | Regras de notificação (dependem de canal de envio) |
 | Trilha de auditoria encadeada, com verificação de integridade | Exportação para SIEM que alimente as âncoras |
 | Selar e desselar cofre | Selagem via KMS e quórum Shamir |
-| 18 endpoints e 6 telas: login, dashboard, cofres, detalhe, auditoria, perfil | As demais 51 telas do inventário |
 
-**185 testes** (81 unitários, 52 de integração, 52 end-to-end), validados
-também com o sistema no ar e conferidos no navegador.
+Fora do escopo entregue, por fase: acesso de máquina para RPAs (AppRole,
+leases, consumo) é fase 2; gravação de sessão e integrações (SES, WhatsApp,
+LDAP) são fase 3.
 
 ### Ambiente de demonstração
 
@@ -37,23 +48,33 @@ permissão ampla no cofre.
 docker compose up -d --build
 ```
 
-Pronto: `http://localhost:8080`. O banco é criado, o administrador e os dados
-de demonstração entram sozinhos, e os três passos são idempotentes — subir de
+Pronto: **http://vault.localhost**. O banco é criado, o administrador e os
+dados de demonstração entram sozinhos, e os passos são idempotentes — subir de
 novo não duplica nada.
+
+`*.localhost` resolve para 127.0.0.1 em qualquer navegador e no Windows, sem
+precisar editar o arquivo `hosts`.
 
 | Serviço | Endereço | O que é |
 | --- | --- | --- |
-| web | http://localhost:8080 | a aplicação (nginx servindo o build + proxy da API) |
+| web | http://vault.localhost | a aplicação (nginx servindo o build + proxy da API) |
 | api | http://localhost:8777/docs | a API e sua documentação interativa |
 | db | localhost:55432 | Postgres (porta alta para não colidir com outro na máquina) |
+
+Para popular o inventário de demonstração (dispositivos, credenciais em
+vários estados de rotação e certificados vencendo):
+
+```bash
+docker compose exec api python -m app.tools.popular_inventario
+```
 
 Acessos de demonstração:
 
 - `ana.souza@exemplo.com.br` / `SenhaForteDeDev2026` — administrador
 - `contador@exemplo.com.br` / `SenhaDoContador2026` — carteira limitada
 
-O navegador fala só com a porta 8080: o nginx encaminha `/api/` para a API no
-mesmo host, então não há CORS nem endereço de backend embutido no bundle.
+O navegador fala só com um host: o nginx encaminha `/api/` para a API no
+mesmo lugar, então não há CORS nem endereço de backend embutido no bundle.
 
 ### Sem Docker
 
@@ -139,6 +160,36 @@ as duas pontas, porque a troca de conta nem sempre passa por um logout.
 30 s, e copiar não exibe nada na tela. O `__repr__` dos objetos que carregam
 valor em claro é sobrescrito, para que um traceback não imprima senha em log.
 
+**Concessão temporária soma, nunca subtrai.** Um acesso aprovado vale ao lado
+das políticas, com prazo, e caduca sozinho — ninguém precisa lembrar de
+remover, que é como acesso temporário vira permanente. Mas um `deny` explícito
+não é contornado por concessão: a ordem em `decide` é negação → política →
+concessão → nega por padrão. Compor as duas fontes com um OR deixaria uma
+aprovação de emergência furar uma proibição deliberada. Quem precisa furar o
+`deny` altera a política, que é revisada.
+
+**Quem pede não decide**, nem tendo `APPROVE` no caminho. Auto-aprovação
+transforma o fluxo inteiro em formalidade. E a decisão é terminal: pedir de
+novo é outro registro, com outro rastro.
+
+**Custódia de credencial é exclusiva.** Se duas pessoas retiram a mesma
+credencial, as duas trocam a senha e a segunda invalida a da primeira sem que
+ninguém perceba. A regra está no domínio e um índice parcial no banco a apoia,
+porque sob concorrência o domínio só perceberia na leitura seguinte.
+
+**Credencial nunca rotacionada conta como atrasada.** É o pior caso — pode
+ainda ser a senha de fábrica — e tratá-la como "sem informação" a esconderia
+justamente do relatório que existe para encontrá-la.
+
+**A busca varre só o permitido.** Zero resultados não pode significar coisa
+diferente de "não existe" para quem não tem acesso, senão a busca vira um mapa
+do que está fora do alcance. E o valor do segredo nunca entra na comparação:
+casar por conteúdo permitiria extraí-lo por tentativa e erro.
+
+**Alertas são derivados, não gravados.** Alerta persistido precisa ser apagado
+quando a causa some; esquecer disso produz alarme falso, que é pior do que
+painel vazio.
+
 ## Limites conhecidos da auditoria
 
 A cadeia de hash detecta adulteração **preguiçosa**: alterar, remover ou
@@ -176,15 +227,22 @@ passaria aqui e quebraria lá.
 ```
 backend/app/
   domain/           Python puro: entidades e regras, sem FastAPI nem ORM
+    access/         políticas e avaliação (negação vence)
+    approvals/      solicitações, concessões temporárias e a composição
+    audit/          trilha encadeada por hash e âncoras externas
+    inventory/      dispositivos, credenciais com custódia, certificados
+    vaults/         cofres e segredos versionados
   application/      casos de uso (1 arquivo = 1 caso) e portas
   infrastructure/   SQLAlchemy, cripto, auth — implementa as portas
   api/              routers finos: validam, chamam o caso de uso, mapeiam erro
 frontend/src/
   shared/ui/        design system (tokens do próprio sistema de design)
   shared/api/       cliente HTTP com refresh automático
-  features/         auth, dashboard, vaults, secrets
+  features/         auth, dashboard, vaults, secrets, admin, inventory,
+                    approvals, search
 docs/
   inventario-telas.md   as 57 telas, transcritas do documento de arquitetura
+  mapa_telas.py         cruza o inventário com o que existe hoje
 ```
 
 A dependência aponta sempre para dentro: `api → application → domain`. O
