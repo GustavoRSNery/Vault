@@ -1,15 +1,84 @@
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/features/auth/AuthContext'
 import { useCofres } from '@/features/vaults/CofresPage'
+import { request } from '@/shared/api/client'
 import { Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
+import {
+  BarrasEmpilhadas,
+  BarrasHorizontais,
+  Legenda,
+  type Serie,
+} from '@/shared/charts'
+
+type PontoDaSerie = {
+  dia: string
+  sucesso: number
+  negado: number
+  falha_login: number
+}
+
+/**
+ * As três faixas do gráfico de atividade.
+ *
+ * Separadas de propósito: somadas num total só esconderiam a crista
+ * vermelha, que num cofre de senhas é o sinal mais importante que existe.
+ */
+const FAIXAS: Serie<PontoDaSerie>[] = [
+  {
+    chave: 'sucesso',
+    rotulo: 'Concluído',
+    classe: 'faixa-sucesso',
+    valor: (p) => p.sucesso,
+  },
+  { chave: 'negado', rotulo: 'Negado', classe: 'faixa-negado', valor: (p) => p.negado },
+  {
+    chave: 'falha',
+    rotulo: 'Falha de login',
+    classe: 'faixa-falha',
+    valor: (p) => p.falha_login,
+  },
+]
+
+/** `2026-10-20` vira `20/10`: o ano é o mesmo em toda a janela. */
+function diaCurto(iso: string): string {
+  const [, mes, dia] = iso.split('-')
+  return `${dia}/${mes}`
+}
+
+type Metricas = {
+  dias: number
+  dias_com_dado: number
+  total: number
+  serie: PontoDaSerie[]
+  por_ator: { rotulo: string; quantas: number }[]
+  por_caminho: { rotulo: string; quantas: number }[]
+  restrito: boolean
+  capacidade_exigida: string
+}
+
+const JANELAS = [
+  { dias: 7, rotulo: '7 dias' },
+  { dias: 30, rotulo: '30 dias' },
+  { dias: 90, rotulo: '90 dias' },
+]
 
 export function DashboardPage() {
   const { usuario } = useAuth()
   const { data: cofres, isLoading } = useCofres()
+  const [dias, setDias] = useState(30)
+
+  const { data: metricas, isLoading: carregandoMetricas } = useQuery({
+    queryKey: ['metricas', dias],
+    queryFn: () => request<Metricas>(`/metricas/serie?dias=${dias}`),
+  })
 
   const primeiroNome = usuario?.full_name.split(' ')[0] ?? ''
   const ativos = cofres?.filter((c) => c.state === 'ativo').length ?? 0
   const selados = cofres?.filter((c) => c.state === 'selado').length ?? 0
+
+  const negados = metricas?.serie.reduce((soma, p) => soma + p.negado, 0) ?? 0
 
   return (
     <>
@@ -27,6 +96,101 @@ export function DashboardPage() {
             <CardMetrica rotulo="Cofres ativos" valor={ativos} tom="success" />
             <CardMetrica rotulo="Cofres selados" valor={selados} tom="danger" />
           </div>
+
+          <Card
+            titulo="Atividade do cofre"
+            acao={
+              <div className="pill-group">
+                {JANELAS.map((janela) => (
+                  <button
+                    key={janela.dias}
+                    type="button"
+                    className={`pill${dias === janela.dias ? ' active' : ''}`}
+                    onClick={() => setDias(janela.dias)}
+                  >
+                    {janela.rotulo}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            {carregandoMetricas ? (
+              <Carregando texto="Lendo a trilha…" />
+            ) : !metricas || metricas.total === 0 ? (
+              <Vazio
+                titulo="Nenhum movimento no período"
+                descricao="Nada foi revelado, negado ou tentado nesta janela."
+              />
+            ) : (
+              <div className="col" style={{ gap: 14 }}>
+                <div className="row between wrap" style={{ gap: 12 }}>
+                  <Legenda
+                    itens={FAIXAS.map((f) => ({
+                      chave: f.chave,
+                      rotulo: f.rotulo,
+                      classe: `k-${f.chave}`,
+                    }))}
+                  />
+                  <span className="help">
+                    {/* A janela pedida e o histórico real são coisas
+                        diferentes: dizer "30 dias" num cofre instalado há 3
+                        sugeriria uma queda de atividade que não houve. */}
+                    {metricas.total} evento(s) em {metricas.dias_com_dado} dia(s) com
+                    movimento
+                    {metricas.dias_com_dado < metricas.dias &&
+                      ` · janela de ${metricas.dias} dias`}
+                  </span>
+                </div>
+
+                <BarrasEmpilhadas
+                  pontos={metricas.serie}
+                  series={FAIXAS}
+                  rotuloDoPonto={(p) => diaCurto(p.dia)}
+                  descricao={`Atividade por dia em ${metricas.dias} dias: ${metricas.total} eventos.`}
+                />
+
+                {negados > 0 && (
+                  <p className="help" style={{ margin: 0 }}>
+                    <b style={{ color: 'var(--danger-text)' }}>
+                      {negados} acesso(s) negado(s)
+                    </b>{' '}
+                    no período. Negação em série costuma ser política mal
+                    dimensionada — ou alguém pedindo o que não deveria.
+                  </p>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {metricas?.restrito && metricas.total > 0 && (
+            <Card>
+              <p className="help" style={{ margin: 0 }}>
+                Os rankings de atividade —{' '}
+                <i>quem mais revela segredos</i> e <i>o que mais é revelado</i>{' '}
+                — exigem a capacidade{' '}
+                <b>{metricas.capacidade_exigida}</b> no caminho de auditoria.
+                {/* Dizer por que está ausente, em vez de só omitir: um bloco
+                    que some sem explicação parece falta de dado. */}
+              </p>
+            </Card>
+          )}
+
+          {metricas && !metricas.restrito && metricas.por_ator.length > 0 && (
+            <div className="cards-2">
+              <Card titulo="Quem mais revela segredos">
+                <BarrasHorizontais
+                  itens={metricas.por_ator}
+                  descricao="Pessoas e robôs que mais revelaram segredos no período."
+                />
+              </Card>
+              <Card titulo="O que mais é revelado">
+                <BarrasHorizontais
+                  itens={metricas.por_caminho}
+                  descricao="Segredos mais revelados no período."
+                />
+              </Card>
+            </div>
+          )}
 
           <Card titulo="Seus cofres">
             {!cofres || cofres.length === 0 ? (

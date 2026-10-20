@@ -560,6 +560,12 @@ class ConfiguracaoModel(Base):
     trilha_limite_padrao: Mapped[int] = mapped_column(
         Integer, default=200, nullable=False
     )
+    # Qual capacidade em `auditoria` libera os rankings do painel. O padrão
+    # restritivo vale tambem para a instalacao que ja existia: `evoluir_schema`
+    # acrescenta a coluna com este default.
+    capacidade_do_ranking: Mapped[str] = mapped_column(
+        String(20), default="admin", nullable=False
+    )
     atualizado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
     atualizado_em: Mapped[datetime] = _now_column()
 

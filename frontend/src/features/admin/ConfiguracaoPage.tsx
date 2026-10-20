@@ -65,12 +65,37 @@ const CAMPOS: Campo[] = [
   },
 ]
 
+/**
+ * Como cada capacidade aparece na tela.
+ *
+ * A lista de opções vem do servidor; só os textos moram aqui. Uma capacidade
+ * nova no domínio aparece na tela sozinha, com o nome técnico, em vez de
+ * sumir por falta de tradução.
+ */
+const ROTULO_DA_CAPACIDADE: Record<string, string> = {
+  admin: 'Somente administradores',
+  approve: 'Administradores e gestores',
+}
+
+const AJUDA_DA_CAPACIDADE: Record<string, string> = {
+  admin:
+    'Quem administra a auditoria. É o padrão, e o mais restritivo: numa ' +
+    'instalação nova ninguém mais vê a atividade dos colegas.',
+  approve:
+    'Inclui quem aprova pedidos de acesso — o perfil de gestor. Faz sentido ' +
+    'quando quem decide quem vê o quê também precisa acompanhar o uso.',
+}
+
 export function ConfiguracaoPage() {
   const queryClient = useQueryClient()
   const { data: config, isLoading, error } = useConfiguracao()
   const [valores, setValores] = useState<Record<string, number>>({})
   const [erro, setErro] = useState<string | null>(null)
   const [salvo, setSalvo] = useState(false)
+  // Estado próprio, separado dos campos numéricos: salvar a visibilidade dos
+  // rankings junto com "segredo visível por" misturaria duas decisões de
+  // natureza diferente num botão só.
+  const [capacidade, setCapacidade] = useState<string | null>(null)
 
   // Sincroniza o formulário quando a configuração chega ou muda no servidor.
   useEffect(() => {
@@ -99,6 +124,24 @@ export function ConfiguracaoPage() {
     },
   })
 
+  const salvarCapacidade = useMutation({
+    mutationFn: () =>
+      request<Configuracao>('/configuracao', {
+        method: 'PUT',
+        body: { capacidade_do_ranking: capacidade },
+      }),
+    onSuccess: () => {
+      setErro(null)
+      void queryClient.invalidateQueries({ queryKey: ['configuracao'] })
+      // O painel precisa reconsultar: quem passou a ver os rankings só
+      // descobre isso na próxima leitura das métricas.
+      void queryClient.invalidateQueries({ queryKey: ['metricas'] })
+    },
+    onError: (e) => {
+      setErro(e instanceof ApiError ? e.message : 'Não foi possível salvar.')
+    },
+  })
+
   if (isLoading) return <Carregando texto="Carregando configuração…" />
   if (error || !config) {
     return (
@@ -118,6 +161,11 @@ export function ConfiguracaoPage() {
   const mudou = CAMPOS.some(
     (c) => valores[c.chave as string] !== (config[c.chave] as number),
   )
+
+  // Enquanto ninguém escolher nada, o rádio marcado é o que o servidor diz —
+  // assim a tela nunca mostra uma seleção que não corresponde ao que vale.
+  const capacidadeEscolhida = capacidade ?? config.capacidade_do_ranking
+  const capacidadeMudou = capacidadeEscolhida !== config.capacidade_do_ranking
 
   return (
     <>
@@ -194,6 +242,56 @@ export function ConfiguracaoPage() {
                 {formatarDataHora(config.atualizado_em)}
               </span>
             )}
+          </div>
+        </div>
+      </Card>
+
+      <Card titulo="Quem vê os rankings de atividade">
+        <div className="col" style={{ gap: 14 }}>
+          <p className="sub" style={{ margin: 0 }}>
+            Os rankings do painel — <i>quem mais revela segredos</i> e{' '}
+            <i>o que mais é revelado</i> — mostram a atividade dos colegas, e
+            por isso seguem a mesma regra da trilha de auditoria. O gráfico de
+            atividade continua visível a todos: ele mostra o movimento do
+            cofre em agregado, sem dizer quem fez o quê.
+          </p>
+
+          <div className="col" style={{ gap: 10 }}>
+            {config.capacidades_do_ranking.map((opcao) => (
+              <label
+                key={opcao}
+                className="row"
+                style={{ gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}
+              >
+                <input
+                  type="radio"
+                  name="capacidade_do_ranking"
+                  value={opcao}
+                  checked={capacidadeEscolhida === opcao}
+                  onChange={() => setCapacidade(opcao)}
+                  style={{ marginTop: 3 }}
+                />
+                <span className="col" style={{ gap: 2 }}>
+                  <b>{ROTULO_DA_CAPACIDADE[opcao] ?? opcao}</b>
+                  <span className="help">
+                    {AJUDA_DA_CAPACIDADE[opcao] ??
+                      `Exige a capacidade "${opcao}" no caminho de auditoria.`}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div className="row between wrap" style={{ gap: 10 }}>
+            <Botao
+              onClick={() => salvarCapacidade.mutate()}
+              disabled={!capacidadeMudou || salvarCapacidade.isPending}
+            >
+              {salvarCapacidade.isPending ? 'Salvando…' : 'Salvar'}
+            </Botao>
+            <span className="help">
+              A mudança fica na trilha, com o antes e o depois.
+            </span>
           </div>
         </div>
       </Card>

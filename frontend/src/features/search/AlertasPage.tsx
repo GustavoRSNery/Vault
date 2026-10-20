@@ -1,7 +1,9 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { request } from '@/shared/api/client'
 import { Badge, Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
+import { BarraDeProporcao } from '@/shared/charts'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 type Severidade = 'alta' | 'media' | 'baixa'
@@ -39,11 +41,33 @@ export function AlertasPage() {
     queryFn: () => request<Alertas>('/alertas'),
   })
 
+  // O filtro é por categoria, não por severidade: os cards de severidade já
+  // dão a leitura de gravidade, e "Certificado" ou "Rotação" é o que diz a
+  // quem o problema pertence.
+  const [categoria, setCategoria] = useState<string | null>(null)
+
+  const itens = useMemo(() => data?.itens ?? [], [data])
+
+  const categorias = useMemo(() => {
+    const contagem = new Map<string, number>()
+    for (const alerta of itens) {
+      contagem.set(alerta.categoria, (contagem.get(alerta.categoria) ?? 0) + 1)
+    }
+    // Da mais numerosa para a menos; empate pelo nome, senão a ordem dos
+    // chips muda a cada recarga sem nada ter mudado.
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }, [itens])
+
   if (isLoading) return <Carregando texto="Verificando pendências…" />
 
-  const itens = data?.itens ?? []
+  const altas = itens.filter((i) => i.severidade === 'alta').length
   const medias = itens.filter((i) => i.severidade === 'media').length
   const baixas = itens.filter((i) => i.severidade === 'baixa').length
+
+  // Um chip de categoria que sumiu do filtro deixaria a lista vazia sem
+  // explicação; por isso o filtro só vale se a categoria ainda existe.
+  const filtroAtivo = categoria && categorias.some(([nome]) => nome === categoria)
+  const visiveis = filtroAtivo ? itens.filter((i) => i.categoria === categoria) : itens
 
   return (
     <>
@@ -57,20 +81,72 @@ export function AlertasPage() {
       </header>
 
       <div className="cards-3">
-        <CardMetrica rotulo="Alta" valor={data?.altas ?? 0} tom="danger" />
+        <CardMetrica rotulo="Alta" valor={altas} tom="danger" />
         <CardMetrica rotulo="Média" valor={medias} tom="warning" />
         <CardMetrica rotulo="Informação" valor={baixas} tom="muted" />
       </div>
 
+      {itens.length > 0 && (
+        <Card titulo="Como as pendências se distribuem">
+          <div className="col" style={{ gap: 12 }}>
+            <BarraDeProporcao
+              partes={[
+                { nome: 'Alta', valor: altas, classe: 'k-negado' },
+                { nome: 'Média', valor: medias, classe: 'k-falha' },
+                { nome: 'Informação', valor: baixas, classe: 'k-sucesso' },
+              ]}
+            />
+            <div className="row between wrap" style={{ gap: 12 }}>
+              <div className="g-legenda">
+                <span className="item">
+                  <span className="chave k-negado" /> Alta · {altas}
+                </span>
+                <span className="item">
+                  <span className="chave k-falha" /> Média · {medias}
+                </span>
+                <span className="item">
+                  <span className="chave k-sucesso" /> Informação · {baixas}
+                </span>
+              </div>
+              <span className="help">{itens.length} pendência(s) no total</span>
+            </div>
+
+            <div className="pill-group" style={{ paddingTop: 4 }}>
+              <button
+                type="button"
+                className={`chip${filtroAtivo ? '' : ' active'}`}
+                onClick={() => setCategoria(null)}
+              >
+                Todas <span className="qtd">{itens.length}</span>
+              </button>
+              {categorias.map(([nome, quantas]) => (
+                <button
+                  key={nome}
+                  type="button"
+                  className={`chip${categoria === nome ? ' active' : ''}`}
+                  onClick={() => setCategoria(categoria === nome ? null : nome)}
+                >
+                  {nome} <span className="qtd">{quantas}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
       <Card>
-        {itens.length === 0 ? (
+        {visiveis.length === 0 ? (
           <Vazio
-            titulo="Nada pendente"
-            descricao="Nenhum certificado vencendo, nenhuma rotação atrasada, nenhum cofre selado."
+            titulo={filtroAtivo ? `Nada em ${categoria}` : 'Nada pendente'}
+            descricao={
+              filtroAtivo
+                ? 'Escolha outra categoria ou volte para "Todas".'
+                : 'Nenhum certificado vencendo, nenhuma rotação atrasada, nenhum cofre selado.'
+            }
           />
         ) : (
           <div className="col" style={{ gap: 10 }}>
-            {itens.map((alerta, i) => (
+            {visiveis.map((alerta, i) => (
               <Link
                 key={`${alerta.categoria}-${i}`}
                 to={alerta.rota}
@@ -84,7 +160,7 @@ export function AlertasPage() {
                       ? 'var(--danger-soft)'
                       : alerta.severidade === 'media'
                         ? 'var(--warning-soft)'
-                        : 'var(--surface-2, rgba(0,0,0,.03))',
+                        : 'var(--surface-200)',
                   textDecoration: 'none',
                   color: 'inherit',
                 }}

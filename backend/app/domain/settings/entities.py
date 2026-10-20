@@ -32,6 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from ..access.policy import Capability
 from ..shared.errors import ValidationError
 from ..shared.value_objects import utcnow
 
@@ -43,6 +44,23 @@ ALERTA_CERTIFICADO_MIN, ALERTA_CERTIFICADO_MAX = 7, 180
 ROTACAO_PADRAO_MIN, ROTACAO_PADRAO_MAX = 0, 3650
 TRILHA_LIMITE_MIN, TRILHA_LIMITE_MAX = 50, 1000
 
+# Quem vê os rankings de atividade do painel ("quem mais revela segredos",
+# "o que mais é revelado").
+#
+# A configuração é por **capacidade exigida**, não por nome de papel. Papel é
+# dado criado em tempo de execução: uma lista de nomes aqui apontaria para o
+# vazio no dia em que alguém renomeasse "gestor", e o ranking sumiria sem
+# explicação. Capacidade faz parte do domínio e não desaparece.
+#
+# Passa no critério deste módulo. O valor mais permissivo (`approve`) amplia a
+# leitura de administradores para quem já aprova pedidos de acesso — gente
+# que, pela definição do papel, já decide quem vê o quê. Não desliga proteção
+# alguma, e o valor restritivo (`admin`) continua sendo o padrão.
+CAPACIDADES_DO_RANKING: tuple[str, ...] = (
+    str(Capability.ADMIN),
+    str(Capability.APPROVE),
+)
+
 
 @dataclass(slots=True)
 class ConfiguracaoOperacional:
@@ -53,6 +71,9 @@ class ConfiguracaoOperacional:
     alerta_certificado_dias: int = 30
     rotacao_dias_padrao: int = 90
     trilha_limite_padrao: int = 200
+    # O padrão é o mais restritivo: numa instalação nova, só administradores
+    # veem a atividade dos colegas. Ampliar é decisão consciente de quem opera.
+    capacidade_do_ranking: str = str(Capability.ADMIN)
     atualizado_por: str = ""
     atualizado_em: datetime = field(default_factory=utcnow)
     id: str = "unica"
@@ -96,6 +117,15 @@ class ConfiguracaoOperacional:
             TRILHA_LIMITE_MAX,
             "A trilha mostra de 50 a 1000 eventos por página.",
         )
+        if self.capacidade_do_ranking not in CAPACIDADES_DO_RANKING:
+            # Lista fechada, e não "qualquer capacidade": `read` ou `list`
+            # aqui abriria a atividade dos colegas a quem só precisa ver o
+            # próprio trabalho — exatamente a porta lateral que a regra fecha.
+            permitidas = ", ".join(CAPACIDADES_DO_RANKING)
+            raise ValidationError(
+                f"capacidade_do_ranking: {self.capacidade_do_ranking!r} não é "
+                f"uma opção. Escolha entre: {permitidas}."
+            )
 
     @staticmethod
     def _faixa(campo: str, valor: int, minimo: int, maximo: int, porque: str) -> None:
@@ -116,6 +146,7 @@ class ConfiguracaoOperacional:
             "alerta_certificado_dias": self.alerta_certificado_dias,
             "rotacao_dias_padrao": self.rotacao_dias_padrao,
             "trilha_limite_padrao": self.trilha_limite_padrao,
+            "capacidade_do_ranking": self.capacidade_do_ranking,
             "atualizado_por": self.atualizado_por,
         }
         atual.update({k: v for k, v in mudancas.items() if v is not None})
@@ -134,6 +165,9 @@ class ConfiguracaoOperacional:
             ("alerta_certificado_dias", "alerta de certificado"),
             ("rotacao_dias_padrao", "rotação padrão"),
             ("trilha_limite_padrao", "limite da trilha"),
+            # Quem vê a atividade dos colegas é a mudança mais sensível desta
+            # tela: é justamente o que uma auditoria vai querer revisar.
+            ("capacidade_do_ranking", "quem vê os rankings"),
         ]
         return [
             f"{rotulo}: {getattr(self, campo)} -> {getattr(outra, campo)}"

@@ -543,6 +543,278 @@ combinam.
 
 ---
 
+## 2026-10-20 — Gráficos com eixo no painel e nos alertas (item 9)
+
+O pedido veio com uma referência concreta: as quatro abas do Orquestrador em
+`indicadores.exemplo.com.br`. Abri as quatro e o padrão que as
+atravessa é densidade alta, eixo nenhum e número sempre legível — heatmap de
+bot × dia com o valor dentro da célula, esteira de etapas com anel de
+progresso, e, na aba de erros, nenhum gráfico: os "top tipos" são **chips
+clicáveis que filtram**.
+
+O usuário pediu dois desvios dessa referência: **menos densidade** e **com
+eixo**. Os dois se justificam pelo volume. O Orquestrador tem 20 dias × 35
+bots = 700 células; o Vault tinha 336 eventos em 3 dias. Um heatmap aqui
+seria uma faixa quase vazia.
+
+### O que a trilha já permitia
+
+Nada de tabela nova. `auditoria_eventos` tem `occurred_at` indexado, `action`,
+`outcome`, `actor_label` e `target_path` — tudo que uma série temporal
+precisa. Medi antes de desenhar, e a medição mudou o desenho: `acesso_negado`
+era o **segundo** evento mais frequente (75), logo atrás de `login_sucesso`
+(85). Num cofre de senhas, negação em série é o sinal mais importante que
+existe, então virou faixa própria no gráfico em vez de número solto.
+
+### Decisões
+
+- **Agregação por dia em Python, não em SQL.** `occurred_at::date` no
+  Postgres usa a timezone da **sessão**. Provei no banco: um evento de 02:30
+  UTC sai como `2026-10-19` numa conexão em `America/Sao_Paulo` e como
+  `2026-10-20` em UTC. A barra mudaria de lugar conforme quem abriu a
+  conexão. O filtro por data continua no SQL, onde o índice trabalha; só o
+  agrupamento subiu.
+- **SVG escrito à mão, sem biblioteca.** São retângulos e uma grade. Recharts
+  custaria centenas de KB para isso e exigiria um tema paralelo, já que as
+  cores vivem nos tokens do CSS. O bundle ficou em 372 KB (106 KB gzip).
+- **Rankings exigem ADMIN em `auditoria`.** "Quem mais revela segredos" expõe
+  a atividade dos colegas, que é exatamente o que a tela de auditoria tranca.
+  Sem a regra, o painel seria a porta lateral para o que a trilha protege
+  pela porta da frente. Sem ADMIN, `restrito: true` e os rankings saem
+  vazios — não com um item só, que sugeriria comparação inexistente.
+- **A série sai com todos os dias, inclusive os vazios.** Dia sem evento é
+  informação; omiti-lo colaria terça em sexta como se fossem consecutivas.
+- **`dias_com_dado` separado de `dias`.** Com 3 dias de histórico, desenhar
+  30 posições vazias sugeriria uma queda de atividade que não houve. A tela
+  diz "340 eventos em 3 dias com movimento · janela de 30 dias".
+
+### A escala do eixo, que errei primeiro
+
+A primeira versão arredondava o teto para 1·10ⁿ/2·10ⁿ/5·10ⁿ com 4 marcas
+fixas. Pareceu razoável até eu ver na tela: com máximo 253 o teto ia para
+**500** e a barra ocupava metade da altura, achatando todas as outras.
+
+Tentei duas correções que **pioraram** — medi as duas antes de aceitar. Exigir
+que o teto fosse múltiplo de 4 levou `86` a um teto de 200 (43% de
+aproveitamento). O que funcionou foi deixar o **número de marcas variar entre
+3 e 5** e escolher a combinação que menos sobra: aproveitamento médio da
+altura subiu de 80% para 87%, sem nunca produzir marca quebrada como 15 ou 45.
+Com os dados reais, o eixo foi de 500 para 300.
+
+### Invariantes
+
+- O valor de um segredo nunca aparece: os rankings trazem **caminho** e
+  **ator**, jamais conteúdo. Verificado no JSON cru do sistema no ar.
+- `total` e `dias_com_dado` são derivados de `serie_cheia`, não do balde da
+  agregação. O balde recebe o que a consulta trouxe, e o filtro não tem teto
+  — um evento com data futura (relógio de robô adiantado) entraria nele sem
+  ser desenhado, e a legenda desmentiria o gráfico.
+- Empate no ranking desempata por nome. `ORDER BY contagem DESC` sozinho não
+  é estável e a ordem oscilaria entre recarregadas.
+
+### Mutação
+
+8 mutantes, 8 mortos, 0 sobreviventes — depois de duas rodadas. Na primeira,
+dois sobreviveram e ambos eram lacuna real:
+
+1. **`.date()` sem converter para UTC.** Aqui descobri que `_aware()` **não**
+   resolve o caso do Postgres: ele só *preenche* timezone ausente (o caso do
+   SQLite), e um valor que já chega com offset `-03` passa intacto. O
+   comentário que eu tinha escrito no código estava errado. Corrigi com
+   `astimezone(UTC)` explícito e escrevi um teste que força na saída do banco
+   o formato que só o Postgres produz — coisa que um teste contra SQLite
+   jamais geraria sozinho.
+2. **`dias_com_dado = len(por_dia)`.** Parecia equivalente. Não é: evento com
+   data futura entra no balde e não na série.
+
+Um terceiro mutante ("janela perde o dia mais antigo") sobreviveu e **é
+genuinamente equivalente**: o laço que monta a série recalcula os dias por
+conta própria, então alargar `desde` só busca linhas que ninguém lê. Removi
+da bateria em vez de escrever teste para ele — mas o fato de duas linhas
+distantes dependerem uma da outra em silêncio foi o que me levou a derivar
+`dias_com_dado` da série.
+
+### Gates
+
+788 testes verdes nos **dois dialetos** (SQLite e Postgres), `eslint
+--max-warnings 0` limpo, `npm run build` limpo, validação com o sistema no ar
+(série de 30 e de 7 dias, limites `dias=0`/`dias=999` recusados com 422, sem
+token recusado) e conferência visual das duas telas no navegador.
+
+---
+
+## 2026-10-20 — Lib de gráficos própria, ranking configurável e menu agrupado
+
+Três pedidos do usuário, na mesma leva.
+
+### 1. Lib de gráficos (`shared/charts`)
+
+O argumento foi: *"isso posteriormente pode dar problema, então podemos fazer
+a nossa lib de gráficos, sei que dá trabalho mas vai melhorar futuramente"*.
+Procede — gráficos soltos num arquivo de 317 linhas é o estado em que o quinto
+gráfico reimplementa marcação de eixo do zero.
+
+A decisão de desenho é **separar cálculo de renderização**:
+
+- `escala.ts` — funções puras de números para números, sem React. É onde moram
+  as decisões difíceis: quanto o eixo aproveita da altura, como as faixas se
+  empilham, quantos rótulos cabem.
+- `primitivos.tsx` — eixo, grade, legenda, moldura e alvo de leitura.
+- Um arquivo por gráfico, montado sobre os dois acima.
+
+Isso é o que torna a lib testável sem DOM. Instalei **Vitest** (o projeto não
+tinha teste de front nenhum) e o núcleo saiu com **18 testes**. O ambiente é
+`node`, não `jsdom`: o núcleo é função pura e exigir DOM só deixaria a suíte
+lenta à toa.
+
+Vitest 2.1.8 trazia vulnerabilidade **crítica** (`tinypool`, `vitest`); subi
+para 5.0.5 e o `npm audit` caiu de 8 problemas com 2 críticos para 2
+moderados — os restantes são do `react-router-dom`, que já existia.
+
+O `BarrasEmpilhadas` ficou genérico: recebe as séries que deve empilhar, não
+três faixas fixas. O gráfico de atividade do cofre é *um uso* dele.
+
+Bundle: 373 KB (106 KB gzip), praticamente igual ao de antes da lib.
+
+### 2. Quem vê os rankings virou configurável
+
+Pedido: *"admin ou gestor, mas deixe configurável isso tb"*.
+
+A escolha de desenho que importa: configurar por **capacidade exigida**
+(`admin` ou `approve`), não por nome de papel. Papel é dado criado em tempo de
+execução — uma lista de nomes na configuração apontaria para o vazio no dia em
+que alguém renomeasse "gestor", e falharia fechando: o ranking sumiria sem
+explicação. Capacidade faz parte do domínio e não desaparece.
+
+Passa no critério que o próprio módulo de configuração estabelece (*"se alguém
+escolher o pior valor possível, isso enfraquece a segurança?"*): o valor mais
+permissivo amplia a leitura para quem **já aprova pedidos de acesso** — gente
+que, pela definição do papel, já decide quem vê o quê. A lista é fechada
+justamente para impedir `read` ou `list`, que abririam a atividade dos colegas
+a quase todo mundo.
+
+Detalhes que decidem o comportamento:
+
+- **ADMIN passa sempre**, mesmo quando a instalação exige APPROVE. Quem
+  administra a auditoria já lê a trilha inteira pela tela de auditoria;
+  recusar aqui só produziria a pergunta "por que o painel esconde o que a
+  trilha mostra?".
+- O padrão é o **restritivo**, inclusive para instalação que já existia —
+  `evoluir_schema` acrescenta a coluna com `default='admin'`.
+- A resposta das métricas carrega `capacidade_exigida`, e a tela **explica**
+  por que não mostra os rankings em vez de apenas omiti-los: um bloco que some
+  sem explicação parece falta de dado.
+- A mudança entra na trilha com antes e depois (`admin -> approve`), porque é
+  o que uma auditoria vai querer revisar.
+
+**Bug reencontrado:** o PUT da configuração monta as mudanças campo a campo, e
+eu esqueci de incluir o novo. Resultado: 200 OK e o campo ignorado em
+silêncio. É exatamente o mesmo bug do `expira_em` na chave de API, no mesmo
+formato. O teste pegou na hora.
+
+### 3. Menu lateral
+
+Pedido: *"eu estou me perdendo com tantos menus, e sem nenhum ícone, mesmas
+cores, sem agrupamento"*. Eram 13 itens em lista corrida.
+
+Agrupei por **pergunta que a pessoa tem na cabeça**, não por entidade do
+sistema: *Visão geral* · *Segredos* (onde o segredo mora) · *Uso e histórico*
+(o que já aconteceu com ele) · *Minha conta* · *Administração*. "Cofres,
+dispositivos, credenciais, certificados" em sequência indistinta não ajuda
+ninguém a parar a busca visual.
+
+Ícones em SVG próprio (`app/icones.tsx`), pelo mesmo motivo da lib de
+gráficos: são vinte formas de poucos traços, e uma biblioteca de ícones
+custaria centenas de KB e traria um estilo que não é o do design system. Todos
+seguem um contrato só — 24×24, traço 1.6, `currentColor` — para herdarem a cor
+do item sem regra extra. São decorativos (`aria-hidden`): o rótulo em texto
+sempre acompanha.
+
+O item ativo passou a ter **três sinais** — fundo, peso da fonte e barra na
+lateral. Fundo sozinho some em tela clara ou impressa, e cor sozinha não chega
+a quem não a distingue. A barra fica em `left:-12px` para alcançar a borda da
+sidebar, que tem 12px de padding; com `left:0` apareceria colada ao texto,
+parecendo defeito.
+
+**O lint pegou um erro meu que eu teria deixado passar:** ao reagrupar, deixei
+"Perfil" de fora do menu. O `IconePerfil` ficou importado sem uso e o
+`--max-warnings 0` reprovou. Sem esse gate, o item teria simplesmente sumido
+da navegação.
+
+### Mutação
+
+11 mutantes atravessando as três frentes — backend e front na mesma bateria.
+10 mortos na primeira rodada; **11 de 11 na segunda**, depois da correção
+abaixo.
+
+O sobrevivente foi instrutivo: remover o `Math.max(1, …)` de
+`passoDosRotulos` não quebrou nada. Investiguei em vez de escrever teste: a
+guarda `if (quantos <= 0) return 1` logo acima já cobre o caso, e com
+`quantos > 0` e `maximoVisivel` finito o `Math.ceil` nunca devolve menos que
+1. O único jeito de produzir zero seria `maximoVisivel = Infinity`, que
+nenhum chamador passa. Era **código morto** fingindo ser defesa.
+
+Apaguei a linha em vez de inventar um teste para defendê-la, e reescrevi o
+mutante para atacar a guarda — que é a proteção de verdade.
+
+### 🚨 O gate do Postgres cobria só um terço da suíte
+
+Investigando uma falha intermitente (`test_capacidade_fora_da_lista_e_recusada`
+falhou uma vez na suíte completa e não reproduziu depois), descobri algo
+bem pior que a falha: **os testes de ponta a ponta nunca rodaram em
+Postgres.**
+
+`tests/integration/conftest.py` honra `VAULT_TEST_DATABASE_URL`, mas
+`tests/e2e/conftest.py` tinha `database_url` fixo em
+`sqlite+pysqlite:///:memory:`. Ou seja, "rodar a suíte no dialeto Postgres"
+cobria **7 arquivos de integração e deixava os 18 de ponta a ponta sempre em
+SQLite** — justamente os que exercitam a API inteira, onde a divergência de
+dialeto aparece.
+
+Isso explica por que o bug da timezone (`_aware` não converte offset já
+existente) precisou de um teste que **forjava** a saída do Postgres: contra
+SQLite, nenhum teste e2e jamais produziria um datetime com offset.
+
+Corrigi em duas tentativas, e a primeira estava errada.
+
+**Tentativa 1 — compartilhar o banco.** Fiz a e2e honrar a variável com
+`drop_all`/`create_all` por teste. Resultado: **39 falhas em
+`tests/integration`**, todas `duplicate key ... ana@exemplo.com.br`. A causa
+é uma diferença de contrato entre as duas suítes que eu não tinha notado: a
+integração isola por **rollback**, enquanto a e2e dá **COMMIT de verdade** (a
+fixture `app` confirma a transação, porque os testes conferem o que ficou
+gravado). Dividindo o banco, o que a e2e commitava sobrevivia para a
+integração encontrar.
+
+**Tentativa 2 — banco separado.** A e2e passou a usar `vault_test_e2e`,
+derivado da mesma variável com sufixo. Nenhuma das duas suítes precisa
+conhecer a outra, e a diferença de contrato deixa de importar. O banco
+precisa existir:
+
+    docker compose exec db psql -U vault -d vault -c "CREATE DATABASE vault_test_e2e;"
+
+O sinal de que passou a valer: `test_api_metricas.py` saiu de 9s para 41s.
+
+**Nota sobre a falha que iniciou tudo.** O `test_capacidade_fora_da_lista`
+falhou uma vez e não reproduziu. A causa foi prosaica e minha: eu tinha duas
+execuções da suíte disputando o mesmo `vault_test` — uma delas disparada
+junto de um `docker compose up --build`. Os 87 erros `already exists` de uma
+terceira execução confirmaram. Não era divergência de dialeto nem
+contaminação entre testes; era concorrência que eu mesmo criei. A lacuna da
+conftest, essa sim, era real — e só apareceu porque fui atrás da falha.
+
+### Validação com o sistema no ar
+
+`evoluir_schema` aplicou sozinho o
+`ALTER TABLE configuracao ADD COLUMN capacidade_do_ranking VARCHAR(20)
+DEFAULT 'admin' NOT NULL` numa tabela que já existia, que é exatamente o
+caso que motivou a ferramenta. Pela tela: troquei para "Administradores e
+gestores", confirmei no banco (`approve`) e na trilha
+(`quem vê os rankings: admin -> approve`, com o autor), e voltei ao padrão
+restritivo.
+
+---
+
 ## Em aberto
 
 - [ ] **Destino inviolável de verdade** para a exportação — o arquivo local

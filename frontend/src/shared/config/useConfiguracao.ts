@@ -7,9 +7,13 @@ export type Configuracao = {
   alerta_certificado_dias: number
   rotacao_dias_padrao: number
   trilha_limite_padrao: number
+  /** Capacidade em `auditoria` que libera os rankings do painel. */
+  capacidade_do_ranking: string
   atualizado_por: string
   atualizado_em: string
   limites: Record<string, [number, number]>
+  /** As opções válidas, vindas do domínio — a tela não as duplica. */
+  capacidades_do_ranking: string[]
 }
 
 /**

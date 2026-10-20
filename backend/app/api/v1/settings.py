@@ -28,6 +28,7 @@ from ...domain.access.policy import Capability, evaluate
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
 from ...domain.settings.entities import (
     ALERTA_CERTIFICADO_MAX,
+    CAPACIDADES_DO_RANKING,
     ALERTA_CERTIFICADO_MIN,
     CUSTODIA_HORAS_MAX,
     CUSTODIA_HORAS_MIN,
@@ -64,11 +65,15 @@ class ConfiguracaoResponse(BaseModel):
     alerta_certificado_dias: int
     rotacao_dias_padrao: int
     trilha_limite_padrao: int
+    capacidade_do_ranking: str
     atualizado_por: str
     atualizado_em: datetime
     # Os limites viajam junto para que a tela mostre a faixa sem duplicar os
     # números: duplicados, divergem no primeiro ajuste.
     limites: dict[str, list[int]]
+    # Pelo mesmo motivo: a tela monta as opções a partir daqui, e acrescentar
+    # uma capacidade no domínio não exige mexer no front.
+    capacidades_do_ranking: list[str]
 
 
 class AtualizarConfiguracaoRequest(BaseModel):
@@ -89,6 +94,11 @@ class AtualizarConfiguracaoRequest(BaseModel):
     trilha_limite_padrao: int | None = Field(
         default=None, ge=TRILHA_LIMITE_MIN, le=TRILHA_LIMITE_MAX
     )
+    # Sem `Literal` aqui de proposito: a lista valida mora no dominio, e
+    # repeti-la no schema criaria duas fontes que divergem no primeiro ajuste.
+    # O valor invalido e recusado por `ConfiguracaoOperacional`, que responde
+    # 422 com a lista de opcoes.
+    capacidade_do_ranking: str | None = None
 
 
 LIMITES = {
@@ -154,6 +164,7 @@ def alterar(
         alerta_certificado_dias=payload.alerta_certificado_dias,
         rotacao_dias_padrao=payload.rotacao_dias_padrao,
         trilha_limite_padrao=payload.trilha_limite_padrao,
+        capacidade_do_ranking=payload.capacidade_do_ranking,
         atualizado_por=current.email,
     )
 
@@ -184,7 +195,9 @@ def _resposta(config) -> ConfiguracaoResponse:  # noqa: ANN001
         alerta_certificado_dias=config.alerta_certificado_dias,
         rotacao_dias_padrao=config.rotacao_dias_padrao,
         trilha_limite_padrao=config.trilha_limite_padrao,
+        capacidade_do_ranking=config.capacidade_do_ranking,
         atualizado_por=config.atualizado_por,
         atualizado_em=config.atualizado_em,
         limites=LIMITES,
+        capacidades_do_ranking=list(CAPACIDADES_DO_RANKING),
     )

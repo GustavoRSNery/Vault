@@ -124,10 +124,20 @@ npm run dev     # http://localhost:5173, com proxy para o backend
 cd backend
 ./.venv/Scripts/python.exe -m pytest tests/ -q
 
-# Mesma suíte no dialeto de produção (ver "Postgres", abaixo):
+# Mesma suíte no dialeto de produção (ver "Postgres", abaixo).
+# Exige DOIS bancos, criados uma vez:
+#   CREATE DATABASE vault_test;
+#   CREATE DATABASE vault_test_e2e;
 VAULT_TEST_DATABASE_URL=postgresql+psycopg://user:senha@localhost:5432/vault_test \
   ./.venv/Scripts/python.exe -m pytest tests/ -q
 ```
+
+Os testes de ponta a ponta usam o banco com sufixo `_e2e`, derivado
+automaticamente dessa mesma URL. São bancos separados porque as duas
+suítes isolam de formas incompatíveis: `tests/integration` desfaz tudo
+por **rollback**, enquanto `tests/e2e` dá **COMMIT de verdade** — os
+testes conferem o que ficou gravado. Dividindo o banco, o que a e2e
+grava sobrevive e a integração quebra com violação de unicidade.
 
 ### Revisão adversarial
 
@@ -380,6 +390,12 @@ o Postgres com, e o hash da auditoria mudava conforme o banco — a trilha
 falharia na verificação em produção. O carimbo é normalizado antes do hash e há
 teste de regressão, mas a lição fica: **ao mexer em SQL ou em tipo de coluna,
 rode a suíte com `VAULT_TEST_DATABASE_URL` apontando para um Postgres.**
+
+Confira que está valendo pelo **tempo de execução**: contra Postgres a suíte
+leva minutos, contra SQLite leva segundos. Tempo igual nos dois é sinal de que
+o banco real não foi tocado — foi assim que se descobriu que, por um tempo, a
+variável afetava apenas `tests/integration` e os testes de ponta a ponta
+seguiam em SQLite.
 
 As FKs também são ligadas explicitamente nos testes (`PRAGMA foreign_keys=ON`),
 porque no SQLite elas vêm desligadas e um teste de integridade referencial

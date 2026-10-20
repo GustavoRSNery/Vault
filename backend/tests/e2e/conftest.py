@@ -32,11 +32,39 @@ SENHA = "senha-forte-do-ana.souza-2026"
 EMAIL = "ana.souza@exemplo.com.br"
 
 
+# Mesma variável que `tests/integration` honra. Sem isto, "rodar a suíte no
+# dialeto Postgres" cobriria só os 7 arquivos de integração e deixaria os 18
+# de ponta a ponta sempre em SQLite — justamente os que exercitam a API
+# inteira, onde a divergência de dialeto aparece.
+#
+# **Banco separado, com sufixo `_e2e`.** As duas suítes não podem dividir o
+# mesmo: ali o isolamento vem de rollback por teste, e aqui os testes dão
+# COMMIT de verdade (a fixture `app` confirma a transação, porque os testes
+# conferem o que ficou gravado). Dividir o banco faria o e-mail fixo de um
+# colidir com a linha commitada do outro, e o resultado passaria a depender
+# da ordem de coleta — a pior classe de falha para diagnosticar.
+#
+# O banco precisa existir:
+#   docker compose exec db psql -U vault -d vault -c "CREATE DATABASE vault_test_e2e;"
+def _url_da_e2e() -> str | None:
+    bruta = os.getenv("VAULT_TEST_DATABASE_URL")
+    if not bruta:
+        return None
+    base, _, nome = bruta.rpartition("/")
+    # `rpartition` separa o nome do banco do resto da URL; a query string, se
+    # houver, viaja junto com o nome e precisa ser preservada.
+    nome, sep, parametros = nome.partition("?")
+    return f"{base}/{nome}_e2e{sep}{parametros}"
+
+
+POSTGRES_URL = _url_da_e2e()
+
+
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
         environment="test",
-        database_url="sqlite+pysqlite:///:memory:",
+        database_url=POSTGRES_URL or "sqlite+pysqlite:///:memory:",
         master_key_b64=CHAVE_TESTE,
         jwt_secret=JWT_TESTE,
     )
@@ -44,23 +72,35 @@ def settings() -> Settings:
 
 @pytest.fixture
 def db_session(settings: Settings) -> Iterator[Session]:
-    # StaticPool é obrigatório aqui: ":memory:" cria um banco NOVO por conexão,
-    # então o create_all e a sessão da requisição cairiam em bancos distintos
-    # ("no such table"). Com StaticPool todos compartilham a mesma conexão.
-    engine = create_engine(
-        settings.database_url,
-        future=True,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if POSTGRES_URL:
+        engine = create_engine(POSTGRES_URL, future=True)
+        # Estes testes dão COMMIT (a fixture `app` confirma a transação,
+        # porque conferem o que ficou gravado), então não há rollback para
+        # desfazer nada entre um teste e o seguinte. Cada um começa do zero.
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
+    else:
+        # StaticPool é obrigatório aqui: ":memory:" cria um banco NOVO por
+        # conexão, então o create_all e a sessão da requisição cairiam em
+        # bancos distintos ("no such table"). Com StaticPool todos
+        # compartilham a mesma conexão.
+        engine = create_engine(
+            settings.database_url,
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
 
-    @event.listens_for(engine, "connect")
-    def _fk_on(dbapi_connection, _record):  # type: ignore[no-untyped-def]
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+        # SQLite ignora FK por padrão: sem isto, um teste de integridade
+        # referencial passaria aqui e quebraria em Postgres.
+        @event.listens_for(engine, "connect")
+        def _fk_on(dbapi_connection, _record):  # type: ignore[no-untyped-def]
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
-    Base.metadata.create_all(engine)
+        Base.metadata.create_all(engine)
+
     factory = sessionmaker(bind=engine, future=True, expire_on_commit=False)
     session = factory()
     try:

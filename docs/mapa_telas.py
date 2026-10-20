@@ -23,8 +23,8 @@ ESTADO = {
     "Login": ("PAGINA", "/login"),
     "Desafio MFA": ("EMBUTIDA", "no próprio login, quando o MFA está ativo"),
     "Configurar MFA": ("EMBUTIDA", "/perfil"),
-    "Esqueci a senha": ("ABERTA", "exige envio de e-mail"),
-    "Redefinir senha": ("ABERTA", "exige envio de e-mail"),
+    "Esqueci a senha": ("PAGINA", "/recuperar — por TOTP, sem depender de e-mail"),
+    "Redefinir senha": ("PAGINA", "/recuperar — segunda etapa, apos o TOTP"),
     "Sistema selado": ("EMBUTIDA", "aviso no detalhe do cofre + alerta"),
     # Dashboard
     "Dashboard pessoal": ("PAGINA", "/"),
@@ -72,7 +72,7 @@ ESTADO = {
     "Relatório de expirações": ("EMBUTIDA", "/certificados + /alertas"),
     # Alertas
     "Central de alertas": ("PAGINA", "/alertas"),
-    "Regras de notificação": ("ABERTA", "exige canal de envio (SES/WhatsApp)"),
+    "Regras de notificação": ("EMBUTIDA", "/admin/integracoes — assinatura por evento"),
     # Pessoas & Grupos
     "Usuários": ("PAGINA", "/admin/usuarios"),
     "Detalhe/convite": ("EMBUTIDA", "editor de papéis; convite por e-mail em aberto"),
@@ -81,7 +81,7 @@ ESTADO = {
     "Editor de política": ("PAGINA", "/admin/politicas, com simulador"),
     # Administracao
     "Configurações": ("PAGINA", "/admin/configuracao"),
-    "Integrações": ("ABERTA", "fase 3"),
+    "Integrações": ("PAGINA", "/admin/integracoes — webhooks (Standard Webhooks)"),
     "Selagem e chaves": ("EMBUTIDA", "selar/desselar no detalhe do cofre; KMS em aberto"),
     "Backups": ("ABERTA", "responsabilidade de infraestrutura"),
     "Saúde do sistema": ("EMBUTIDA", "/saude na API"),

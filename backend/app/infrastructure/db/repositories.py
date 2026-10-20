@@ -7,7 +7,7 @@ costura fica num lugar só.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -555,6 +555,87 @@ class AuditRepository:
             (linha.target_path, linha.quantas, _aware(linha.ultima))
             for linha in self._session.execute(consulta).all()
         ]
+
+    def serie_por_dia(
+        self, *, desde: datetime
+    ) -> list[tuple[date, str, str, int]]:
+        """Contagem de eventos por (dia, acao, desfecho), do mais antigo ao mais novo.
+
+        A agregacao por dia acontece em Python, nao em SQL, de proposito. Um
+        `occurred_at::date` no Postgres usa a timezone da SESSAO: um evento de
+        02:30 UTC cai no dia 19 numa conexao em America/Sao_Paulo e no dia 20
+        numa conexao em UTC. A barra do grafico mudaria de lugar conforme quem
+        abriu a conexao, que e exatamente a classe de divergencia entre
+        dialetos que ja custou um incidente aqui.
+
+        O `astimezone(UTC)` abaixo nao e redundante com `_aware`: aquele so
+        PREENCHE timezone ausente (o caso do SQLite), enquanto o Postgres
+        devolve o valor ja convertido para a timezone da sessao — com offset
+        -03, `.date()` cru entregaria o dia anterior. A conversao explicita e
+        o que faz o dia sair igual nos dois bancos.
+
+        O filtro por data continua no SQL, onde o indice de `occurred_at`
+        trabalha; so o agrupamento sobe.
+        """
+        linhas = self._session.execute(
+            select(
+                AuditEventModel.occurred_at,
+                AuditEventModel.action,
+                AuditEventModel.outcome,
+            ).where(AuditEventModel.occurred_at >= desde)
+        ).all()
+
+        baldes: dict[tuple[date, str, str], int] = {}
+        for linha in linhas:
+            momento = _aware(linha.occurred_at)
+            assert momento is not None  # occurred_at e NOT NULL
+            chave = (momento.astimezone(UTC).date(), linha.action, linha.outcome)
+            baldes[chave] = baldes.get(chave, 0) + 1
+
+        return [
+            (dia, acao, desfecho, quantas)
+            for (dia, acao, desfecho), quantas in sorted(baldes.items())
+        ]
+
+    def ranking(
+        self,
+        coluna: str,
+        *,
+        acoes: tuple[str, ...],
+        desde: datetime,
+        limite: int = 8,
+        desfecho: str | None = None,
+    ) -> list[tuple[str, int]]:
+        """Top `limite` valores de `coluna` para as acoes informadas.
+
+        `coluna` e escolhida de um mapa fechado, nunca interpolada: aceitar
+        nome de coluna vindo da rota seria injecao de SQL pela porta da frente.
+        """
+        alvos = {
+            "ator": AuditEventModel.actor_label,
+            "caminho": AuditEventModel.target_path,
+        }
+        if coluna not in alvos:
+            raise ValueError(f"coluna nao permitida no ranking: {coluna!r}")
+        alvo = alvos[coluna]
+
+        consulta = (
+            select(alvo, func.count().label("quantas"))
+            .where(
+                AuditEventModel.action.in_(acoes),
+                AuditEventModel.occurred_at >= desde,
+            )
+            .group_by(alvo)
+            # O desempate por nome evita que duas linhas empatadas troquem de
+            # posicao entre uma leitura e outra: ORDER BY com empate nao e
+            # estavel, e no Postgres a ordem pode mudar entre execucoes.
+            .order_by(func.count().desc(), alvo)
+            .limit(limite)
+        )
+        if desfecho is not None:
+            consulta = consulta.where(AuditEventModel.outcome == desfecho)
+
+        return [(linha[0], linha.quantas) for linha in self._session.execute(consulta).all()]
 
     def anchors(self) -> list[ChainAnchor]:
         models = self._session.scalars(
@@ -1391,6 +1472,7 @@ class ConfiguracaoRepository:
                 alerta_certificado_dias=padrao.alerta_certificado_dias,
                 rotacao_dias_padrao=padrao.rotacao_dias_padrao,
                 trilha_limite_padrao=padrao.trilha_limite_padrao,
+                capacidade_do_ranking=padrao.capacidade_do_ranking,
             )
             self._session.add(model)
             self._session.flush()
@@ -1408,6 +1490,7 @@ class ConfiguracaoRepository:
         model.alerta_certificado_dias = config.alerta_certificado_dias
         model.rotacao_dias_padrao = config.rotacao_dias_padrao
         model.trilha_limite_padrao = config.trilha_limite_padrao
+        model.capacidade_do_ranking = config.capacidade_do_ranking
         model.atualizado_por = config.atualizado_por
         model.atualizado_em = config.atualizado_em
         self._session.flush()
@@ -1421,6 +1504,7 @@ def _to_configuracao(model: ConfiguracaoModel) -> ConfiguracaoOperacional:
         alerta_certificado_dias=model.alerta_certificado_dias,
         rotacao_dias_padrao=model.rotacao_dias_padrao,
         trilha_limite_padrao=model.trilha_limite_padrao,
+        capacidade_do_ranking=model.capacidade_do_ranking,
         atualizado_por=model.atualizado_por,
         atualizado_em=_aware(model.atualizado_em),
         id=model.id,
