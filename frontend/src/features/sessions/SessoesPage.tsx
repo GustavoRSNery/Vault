@@ -23,6 +23,22 @@ export type Sessao = {
   minha: boolean
   capturado_por: string
   captura_automatica: boolean
+  origem: {
+    ip_address: string | null
+    hostname: string
+    user_agent: string
+    dispositivo_name: string
+    descricao: string
+    identificada: boolean
+  }
+  consumo: {
+    tipo: string
+    nome: string
+    caminho: string
+    pertence_a: string
+    descricao: string
+    saiu_do_cofre: boolean
+  }
 }
 
 const TIPOS = [
@@ -187,7 +203,9 @@ export function TabelaSessoes({
             <th>Início</th>
             <th>Duração</th>
             <th>Eventos</th>
-            <th>Origem</th>
+            <th>De onde</th>
+            <th>Usou</th>
+            <th>Captura</th>
             {acao && <th />}
           </tr>
         </thead>
@@ -208,6 +226,21 @@ export function TabelaSessoes({
               <td className="muted">{formatarDataHora(s.iniciada_em)}</td>
               <td className="secret-sm">{formatarDuracao(s.duracao_ms)}</td>
               <td className="secret-sm">{s.eventos}</td>
+              <td className="muted">
+                {s.origem?.identificada ? (
+                  <>
+                    {s.origem.descricao}
+                    {s.origem.user_agent && (
+                      <div className="help">{s.origem.user_agent}</div>
+                    )}
+                  </>
+                ) : (
+                  <span className="help">não identificada</span>
+                )}
+              </td>
+              <td className="muted">
+                <ConsumoDaSessao consumo={s.consumo} />
+              </td>
               <td>
                 {s.captura_automatica ? (
                   <Badge tom="success">capturada</Badge>
@@ -224,6 +257,44 @@ export function TabelaSessoes({
   )
 }
 
+/**
+ * O que a sessão usou para entrar.
+ *
+ * Mostra o NOME e o CAMINHO, nunca o valor: saber que a sessão usou
+ * `cofres/infra/segredos/senha-root` responde à auditoria sem revelar nada.
+ * Quem precisa do valor vai ao cofre, e essa ida fica registrada.
+ */
+function ConsumoDaSessao({ consumo }: { consumo: Sessao['consumo'] }) {
+  if (!consumo || consumo.tipo === 'nao_identificado') {
+    return <span className="help">não identificado</span>
+  }
+  if (consumo.tipo === 'propria') {
+    return <span className="help">credencial da própria pessoa</span>
+  }
+
+  const rotulo =
+    consumo.tipo === 'chave_api'
+      ? 'Chave de API'
+      : consumo.tipo === 'certificado'
+        ? 'Certificado'
+        : 'Credencial'
+
+  return (
+    <div className="col" style={{ gap: 4 }}>
+      <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+        <Badge tom={consumo.saiu_do_cofre ? 'warning' : 'muted'}>{rotulo}</Badge>
+        <span>{consumo.nome}</span>
+      </div>
+      {consumo.pertence_a && <span className="help">{consumo.pertence_a}</span>}
+      {consumo.caminho && (
+        <span className="help" title="Caminho do segredo. O valor não sai daqui.">
+          <code>{consumo.caminho}</code>
+        </span>
+      )}
+    </div>
+  )
+}
+
 function NovaSessao({
   aoFechar,
   aoAbrir,
@@ -236,12 +307,29 @@ function NovaSessao({
   const [tipo, setTipo] = useState('ssh')
   const [alvo, setAlvo] = useState('')
   const [motivo, setMotivo] = useState('')
+  const [maquina, setMaquina] = useState('')
+  const [consumoTipo, setConsumoTipo] = useState('nao_identificado')
+  const [consumoNome, setConsumoNome] = useState('')
+  const [consumoDono, setConsumoDono] = useState('')
+  const [caminho, setCaminho] = useState('')
+
+  const precisaNome =
+    consumoTipo !== 'nao_identificado' && consumoTipo !== 'propria'
 
   const abrir = useMutation({
     mutationFn: () =>
       request<Sessao>('/sessoes', {
         method: 'POST',
-        body: { tipo, alvo, motivo },
+        body: {
+          tipo,
+          alvo,
+          motivo,
+          origem_hostname: maquina.trim(),
+          consumo_tipo: consumoTipo,
+          consumo_nome: consumoNome.trim(),
+          consumo_pertence_a: consumoDono.trim(),
+          segredo_path: caminho.trim() || null,
+        },
       }),
     onSuccess: aoAbrir,
     onError: (e) =>
@@ -281,6 +369,57 @@ function NovaSessao({
           ajuda="Fica na trilha. Opcional, mas é o que responde 'por que esse acesso?' depois."
         />
 
+        <Campo
+          rotulo="Sua máquina"
+          value={maquina}
+          onChange={(e) => setMaquina(e.target.value)}
+          ajuda="Nome do computador de onde você está acessando. O IP sozinho não distingue duas pessoas na mesma rede."
+          placeholder="NOTE-CONTABIL-07"
+        />
+
+        <div className="field">
+          <label htmlFor="consumo">O que você vai usar para entrar</label>
+          <select
+            id="consumo"
+            className="input"
+            value={consumoTipo}
+            onChange={(e) => setConsumoTipo(e.target.value)}
+          >
+            <option value="nao_identificado">Não informar</option>
+            <option value="credencial">Credencial do cofre</option>
+            <option value="chave_api">Chave de API</option>
+            <option value="certificado">Certificado</option>
+            <option value="propria">Minha própria credencial</option>
+          </select>
+          <span className="help">
+            Identifica o que foi usado, nunca o valor. Quem precisa do valor
+            vai ao cofre, e essa ida fica registrada.
+          </span>
+        </div>
+
+        {precisaNome && (
+          <>
+            <Campo
+              rotulo="Qual"
+              value={consumoNome}
+              onChange={(e) => setConsumoNome(e.target.value)}
+              ajuda="O nome do que você vai usar. Ex.: senha-root, SEFAZ NF-e."
+            />
+            <Campo
+              rotulo="De quem"
+              value={consumoDono}
+              onChange={(e) => setConsumoDono(e.target.value)}
+              ajuda="Opcional. O dispositivo ou serviço dono do segredo."
+            />
+            <Campo
+              rotulo="Caminho no cofre"
+              value={caminho}
+              onChange={(e) => setCaminho(e.target.value)}
+              ajuda="Opcional. Ex.: cofres/infra/segredos/senha-root. Só o caminho — o valor nunca é gravado aqui."
+            />
+          </>
+        )}
+
         <Alerta tom="warning">
           Nesta instalação a gravação é <b>manual</b>: você registra o que fez.
           Com um proxy conectado, a captura passa a ser automática — e a tela
@@ -288,7 +427,11 @@ function NovaSessao({
         </Alerta>
 
         <div className="row" style={{ gap: 10 }}>
-          <Botao onClick={() => abrir.mutate()} disabled={!alvo.trim() || abrir.isPending}>
+          <Botao onClick={() => abrir.mutate()} disabled={
+              !alvo.trim() ||
+              (precisaNome && !consumoNome.trim()) ||
+              abrir.isPending
+            }>
             {abrir.isPending ? 'Abrindo…' : 'Abrir'}
           </Botao>
           <Botao variante="secondary" onClick={aoFechar}>

@@ -7,7 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api.errors import domain_error_handler, unexpected_error_handler
 from .api.v1 import (
+    integrations,
     admin,
+    apikeys,
     approvals,
     audit,
     auth,
@@ -60,6 +62,8 @@ def create_app() -> FastAPI:
     app.include_router(settings_router.router, prefix="/api/v1")
     app.include_router(sessions.router, prefix="/api/v1")
     app.include_router(onboarding.router, prefix="/api/v1")
+    app.include_router(apikeys.router, prefix="/api/v1")
+    app.include_router(integrations.router, prefix="/api/v1")
 
     @app.get("/saude", tags=["Infraestrutura"], summary="Verificação de saúde")
     def saude() -> dict[str, str]:

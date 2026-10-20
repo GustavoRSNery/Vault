@@ -245,6 +245,10 @@ class DeviceModel(Base):
     address: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Formas de alcancar a maquina: RDP, AnyDesk, Google Remote Desktop.
+    # Sao IDENTIFICADORES, nao segredos — dizem onde a maquina esta, nao como
+    # entrar nela. A senha continua no cofre, cifrada.
+    acessos: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = _now_column()
 
@@ -594,6 +598,22 @@ class SessaoModel(Base):
         String(100), default="", nullable=False
     )
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    # De onde a sessao partiu. Colunas planas e nao JSON: a tela filtra por
+    # dispositivo, e filtro dentro de JSON nao usa indice.
+    origem_hostname: Mapped[str] = mapped_column(String(253), default="", nullable=False)
+    origem_user_agent: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    origem_dispositivo: Mapped[str] = mapped_column(
+        String(64), default="", nullable=False, index=True
+    )
+    # O que a sessao consumiu do cofre. Guarda o CAMINHO, nunca o valor.
+    consumo_tipo: Mapped[str] = mapped_column(
+        String(20), default="nao_identificado", nullable=False, index=True
+    )
+    consumo_nome: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    consumo_caminho: Mapped[str] = mapped_column(String(256), default="", nullable=False)
+    consumo_pertence_a: Mapped[str] = mapped_column(
+        String(200), default="", nullable=False
+    )
     iniciada_em: Mapped[datetime] = _now_column()
     ultima_atividade_em: Mapped[datetime] = _now_column()
     encerrada_em: Mapped[datetime | None] = mapped_column(
@@ -676,3 +696,116 @@ class PedidoRedefinicaoModel(Base):
         DateTime(timezone=True), nullable=True
     )
     criado_em: Mapped[datetime] = _now_column()
+
+
+class ChaveApiModel(Base):
+    """Governo de uma chave de API. O VALOR vive no cofre, cifrado.
+
+    `secret_id` aponta para o segredo; SET NULL e nao CASCADE porque excluir
+    o segredo nao deve apagar o registro de que a chave existiu, de qual
+    servico era e quem respondia por ela — que e o que a auditoria quer ler.
+    """
+
+    __tablename__ = "chaves_api"
+
+    id: Mapped[str] = _id_column()
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    servico: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    ambiente: Mapped[str] = mapped_column(
+        String(20), default="producao", nullable=False, index=True
+    )
+    formato: Mapped[str] = mapped_column(String(20), default="bearer", nullable=False)
+    nome_do_campo: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    escopo: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    usada_em: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    responsavel: Mapped[str] = mapped_column(String(200), nullable=False)
+    documentacao_url: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    secret_id: Mapped[str | None] = mapped_column(
+        ForeignKey("segredos.id", ondelete="SET NULL"), nullable=True
+    )
+    vault_name: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    secret_name: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    expira_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    estado: Mapped[str] = mapped_column(
+        String(20), default="ativa", nullable=False, index=True
+    )
+    revogada_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    criado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    created_at: Mapped[datetime] = _now_column()
+
+
+class DestinoWebhookModel(Base):
+    """Endpoint externo que recebe os eventos do Vault.
+
+    O segredo de assinatura fica aqui em claro, e isso e deliberado: ele e o
+    mesmo valor que o destino precisa ter do outro lado para conferir a
+    assinatura, entao cifra-lo so moveria o problema (a chave da cifra
+    estaria no mesmo banco). O que protege este campo e o RBAC: so quem
+    administra integracoes le a tabela.
+    """
+
+    __tablename__ = "integracoes_destinos"
+
+    id: Mapped[str] = _id_column()
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    eventos: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    segredo: Mapped[str] = mapped_column(String(200), nullable=False)
+    estado: Mapped[str] = mapped_column(
+        String(20), default="ativo", nullable=False, index=True
+    )
+    descricao: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    falhas_seguidas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Marcador de leitura da trilha. Por destino, nao global: assim cadastrar
+    # um destino novo nao reenvia o historico inteiro para os antigos.
+    ultima_sequencia: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    ultima_entrega_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ultimo_erro: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    criado_por: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    created_at: Mapped[datetime] = _now_column()
+
+
+class EntregaWebhookModel(Base):
+    """Uma tentativa de entregar um evento.
+
+    O `corpo` e guardado exatamente como foi assinado. Remonta-lo na
+    reentrega produziria bytes diferentes (ordem de chaves, espacos) e uma
+    assinatura que nao confere do outro lado — o erro mais comum desta
+    especificacao.
+    """
+
+    __tablename__ = "integracoes_entregas"
+
+    id: Mapped[str] = _id_column()
+    destino_id: Mapped[str] = mapped_column(
+        ForeignKey("integracoes_destinos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # O `webhook-id`: o mesmo em todas as tentativas, para o destino usar
+    # como chave de idempotencia.
+    id_evento: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    tipo: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    corpo: Mapped[str] = mapped_column(Text, nullable=False)
+    estado: Mapped[str] = mapped_column(
+        String(20), default="pendente", nullable=False, index=True
+    )
+    tentativas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Indexado porque a varredura da fila filtra por "pronta para reenviar".
+    proxima_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    ultimo_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ultimo_erro: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    entregue_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = _now_column()

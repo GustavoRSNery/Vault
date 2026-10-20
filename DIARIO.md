@@ -361,15 +361,209 @@ neste projeto — normalizado na fronteira (`_aware`), com três testes nomeados
 
 ---
 
+## 2026-10-20 — Chaves de API, acesso remoto e exportações
+
+**Decidi:** tratar identificador de acesso remoto (código do AnyDesk, host do
+RDP) como **dado comum, visível e copiável**, e nunca embutir senha no arquivo
+`.rdp`.
+**Porque:** o identificador diz *onde* a máquina está, não *como* entrar nela
+— quem tem o número e não tem a senha não entra. Mascará-lo atrapalharia o uso
+diário (alguém precisa ditar o número no telefone) sem proteger nada. Já a
+senha dentro de um `.rdp` é senha no disco de quem baixou, fora do cofre e
+fora da auditoria; é o padrão que as ferramentas do ramo seguem.
+
+**Feito:**
+- **Chaves de API** — governo completo (serviço, ambiente, formato de envio,
+  escopo, onde é usada, responsável, vencimento). Tela nova, 6 rotas.
+- **Acesso remoto nos dispositivos** — RDP por botão (arquivo gerado sob
+  demanda), AnyDesk e Google Remote Desktop com código visível. Acesso que o
+  sistema não intermedia tem botão de "registrar acesso".
+- **Certificados** — ver detalhes, exportar JSON, excluir.
+- **Credenciais** — exportar JSON, no mesmo tratamento.
+- **`evoluir_schema`** — ferramenta de evolução de schema, no boot do compose.
+
+**Decisões de segurança que podem ser questionadas depois:**
+- O `.rdp` sai **sem senha e sem redirecionar disco local**: copiar-colar
+  basta, e montar o disco de quem conecta numa máquina de produção é
+  superfície de ataque sem ganho.
+- **Exportação nunca carrega valor de segredo** — nem chave privada de
+  certificado, nem senha de credencial. Um "exportar tudo" que os incluísse
+  transformaria um clique de conveniência num vazamento que ninguém audita.
+- **Excluir o governo não apaga o segredo** do cofre: um clique não pode
+  remover a chave e o rastro ao mesmo tempo.
+- **Revogar mantém o registro** — a auditoria quer saber que a chave existiu.
+- Chave **revogada vence o relógio**: decisão humana não vira "expirada"
+  depois.
+
+**Surpresas (todas achadas com o sistema no ar, nenhuma pela suíte):**
+
+1. **`create_all` nunca altera tabela existente.** A coluna
+   `dispositivos.acessos` foi declarada, 651 testes ficaram verdes e a API
+   subiu quebrada: `UndefinedColumn: column dispositivos.acessos does not
+   exist`. Os testes montam o banco do zero a cada execução, então nenhum
+   deles podia ver o problema — o verde era real e inútil ao mesmo tempo.
+   Daí a ferramenta `evoluir_schema`, idempotente, no boot. Ela recusa
+   remover coluna ou mudar tipo: isso perde dado e merece decisão humana.
+
+2. **Default de lista nascendo como `{}`.** Na primeira versão da ferramenta,
+   `acessos` ganhou `DEFAULT '{}'` porque o SQLAlchemy embrulha `default=list`
+   num wrapper e `arg is list` dá falso. A linha antiga devolveria dict onde o
+   código espera list, e o estouro aconteceria longe dali. Corrigido chamando
+   o callable e serializando o que ele produz.
+
+3. **O PUT de chave de API ignorava `expira_em`.** O formulário enviava a
+   data, o schema não declarava o campo e o Pydantic descartava em silêncio:
+   a chave ficava "sem vencimento" para sempre — o oposto do que a tela existe
+   para fazer. De quebra, `exclude_none` tornava impossível *limpar* um
+   vencimento, porque "mandei nulo" era indistinguível de "não mandei".
+   Agora é `exclude_unset`.
+
+4. **O seed de políticas só criava, nunca convergia.** `chaves-api` é entidade
+   nova; em banco que já rodara o seed antes, a política ficava parada na
+   versão antiga e a tela devolvia 403 — o RBAC estava certo, o seed é que
+   ficara para trás. Mesma classe de problema do schema.
+
+**Mutantes mortos:** `.rdp` com senha embutida; exportação de credencial com o
+valor; `ORDER BY` sem `IS NULL` (passa no Postgres e **quebra no SQLite** — a
+demonstração ao vivo de por que a suíte roda nos dois); default de lista como
+dict; `expira_em` fora do schema; `exclude_none` de volta.
+
+**Validação:** 659 testes nos **dois dialetos**; lint com `--max-warnings 0`
+(config de ESLint criada — o script existia e falhava, o que é pior que não
+ter); `npm run build` limpo; e verificação no navegador, com o `.rdp` real
+baixado e conferido linha a linha (sem `password`) e os dois JSON exportados
+sem nenhum campo de segredo.
+
+---
+
+## 2026-10-20 — Sessões, aplicações e integrações (itens 6, 7 e 8)
+
+**Decidi:** separar "de onde partiu" de "o que consumiu" em dois campos da
+sessão, e guardar do consumo apenas o **nome e o caminho** do segredo.
+**Porque:** são duas perguntas diferentes que a revisão faz sobre a mesma
+sessão — qual máquina abriu, e com que credencial. E porque saber que a
+sessão usou `cofres/infra/segredos/senha-root` responde à auditoria sem
+revelar nada: quem quiser o valor passa pela rota de revelar, que registra
+evento próprio. Um campo de valor ali transformaria a lista de sessões num
+despejo de segredos.
+
+**Feito:**
+- **Sessões** — `origem` (IP, hostname, dispositivo do inventário,
+  user-agent) e `consumo` (credencial, chave de API, certificado, própria,
+  não identificado). Colunas novas na tela: "De onde" e "Usou".
+- **Aplicações** — o consumo do robô agora diz o **tipo** de cada segredo
+  lido, com resumo "3 senhas, 1 chave de API". O tipo vem do cadastro do
+  segredo, resolvido numa consulta só.
+- **Integrações** — webhooks no padrão **Standard Webhooks**, com tela,
+  fila visível, teste de ping e rotação de segredo.
+
+**Por que Standard Webhooks.** O usuário pediu "o padrão mais robusto de
+mercado". É a especificação aberta que Svix, Resend e Clerk adotaram, e
+resolve os quatro problemas que derrubam uma integração caseira:
+assinatura HMAC-SHA256 sobre `id.timestamp.corpo` (autenticidade), o
+timestamp dentro da assinatura (repetição), reentrega com backoff e jitter
+por ~75 horas (entrega), e `webhook-id` estável entre tentativas para o
+destino deduplicar (duplicata).
+
+**Decisões de segurança que podem ser questionadas depois:**
+- **O segredo de assinatura aparece uma vez**, no cadastro e na rotação.
+  Repeti-lo numa listagem o espalharia por log de proxy, histórico de
+  navegador e captura de tela de quem só conferia uma URL.
+- **A fila de entregas não mostra o corpo do evento** — ele carrega
+  caminhos de segredos.
+- **`http` simples é recusado**: a assinatura prova a origem, não esconde o
+  conteúdo.
+- **O entregador padrão é o de ensaio**, que não sai para a rede. Um
+  sistema recém-instalado que começasse a disparar eventos de cofre para
+  fora seria uma surpresa desagradável; `EntregadorHttp` está pronto e a
+  troca é uma linha, porque o resto só conhece a porta.
+- **Publicar não faz rede.** Se fizesse, revelar um segredo passaria a
+  depender de um servidor de terceiro estar no ar. Enfileira e devolve; o
+  despacho é outra operação, chamada por um agendador.
+- **Rotacionar invalida o segredo anterior na hora.** A especificação
+  permite enviar duas assinaturas na transição, mas isso exigiria guardar o
+  segredo antigo "por via das dúvidas" — o oposto de rotacionar. A tela
+  avisa que as entregas falham até os dois lados trocarem.
+- **O consumo conta caminhos, não leituras.** Um robô que lê a mesma senha
+  mil vezes usa *uma* senha; somar leituras faria essa senha parecer o
+  grosso do escopo.
+
+**Surpresas:**
+
+1. **Um mutante ficou no código e os testes passaram.** A bateria de
+   mutação tinha um backup gerado depois de uma execução interrompida, e a
+   verificação de janela de tempo voltou como `pass`. Os testes de
+   repetição continuaram verdes — ou seja, não cobriam o que eu supunha. O
+   episódio vale mais que o bug: *bateria de mutação precisa provar que o
+   código está íntegro antes de começar*, senão ela mede o mutante contra
+   si mesmo.
+
+2. **Mutante do jitter sobreviveu por causa de `int()`.** O teste exercitava
+   a primeira falha, onde a base é 5 segundos: `int(5 * 0.2 * x)` arredonda
+   para zero e o jitter nem atua. Trocar `+` por `-` não quebrava nada.
+   Reancorado na terceira falha, mais um teste provando que o jitter de fato
+   varia — uma constante passaria no primeiro.
+
+**Mutantes mortos:** 8 nas invariantes de webhook (janela de tempo,
+`compare_digest`, id com ponto, http simples, id estável entre tentativas,
+jitter, contador de falhas, corpo como texto), 1 na contagem por tipo, 2 na
+ligação com a trilha (destino novo recebendo o histórico; marcador que não
+avança sem assinante) e 1 no adaptador HTTP (410 que não desliga o destino).
+
+**A ligação com os eventos reais.** Terminada a infraestrutura, percebi que
+`publicar` só era chamado pela rota de teste: havia uma tela de integrações
+que não publicava nada. A trilha virou a fonte — ela já é o registro de
+tudo que o sistema faz, e um segundo registro paralelo de "o que falta
+publicar" divergiria dela no primeiro erro de escrita. Cada destino guarda
+sua própria `ultima_sequencia`, então:
+
+- um destino **novo começa no presente**, não recebe o histórico inteiro do
+  cofre de uma vez — seriam eventos antigos que ninguém pediu, e os mais
+  sensíveis entre eles;
+- um destino que ficou **pausado uma semana recebe o que perdeu** quando
+  volta, sem reenviar nada aos demais;
+- o marcador **avança mesmo sem assinante**, senão o sistema reprocessaria
+  para sempre os mesmos eventos que ninguém quer.
+
+O mapa de ação da trilha → tipo publicado é explícito, não derivado do nome
+interno: renomear uma ação no código quebraria integrações de terceiros em
+silêncio. Na primeira versão eu escrevi três nomes que não existiam
+(`segredo_alterado`, `solicitacao_criada`, `solicitacao_aprovada`) — falha
+silenciosa clássica: o evento simplesmente nunca casaria. Agora há teste
+que confere o mapa contra os dois enums.
+
+**Validação:** 777 testes nos **dois dialetos**; lint com `--max-warnings 0`;
+`npm run build` limpo; verificação no navegador — destino cadastrado pela
+tela, https validado, evento de teste entregue, fila conferida, destino
+excluído. E o ciclo real no ar: **revelar um segredo no cofre chegou ao
+destino como `segredo.revelado`, sem o valor**, com o segundo despacho não
+reprocessando. O script de validação fez o papel do destino e **recalculou a
+assinatura HMAC com o segredo recebido**, provando que os dois lados
+combinam.
+
+---
+
 ## Em aberto
 
 - [ ] **Destino inviolável de verdade** para a exportação — o arquivo local
       não é (quem tem o disco reescreve os dois lados). Precisa de Splunk HEC,
       CloudWatch ou bucket com Object Lock. **BLOQUEADO:** exige serviço
       externo e credencial.
-- [ ] **Recuperação de senha e convite de usuário** — **BLOQUEADO:** exige
-      envio de e-mail (SES ou equivalente).
-- [ ] **Regras de notificação** — **BLOQUEADO:** exige canal de envio.
+- [x] **Recuperação de senha e convite de usuário** — feito por TOTP e link
+      de uso único, sem depender de e-mail. O envio por e-mail continua em
+      aberto como *conveniência*, não como requisito: hoje o administrador
+      entrega o link.
+- [x] **Regras de notificação** — feito como integração por webhook
+      (Standard Webhooks), com porta `EntregadorDeWebhook`. O adaptador HTTP
+      está escrito; o padrão é o de ensaio, que não sai para a rede. Para
+      entregar de verdade, trocar uma linha em `deps.get_entregador_webhook`.
+- [ ] **Notificação por e-mail** — a porta de entrega serve, mas falta um
+      adaptador SMTP/SES e um canal configurado. **BLOQUEADO** pela
+      infraestrutura, não pelo código.
+- [ ] **Agendador do despacho** — a rota `POST /integracoes/despachar`
+      existe e processa a fila; falta quem a chame de tempos em tempos. Um
+      cron externo resolve. Deliberadamente não há processo de fundo próprio:
+      esconderia do operador quando as entregas acontecem.
 - [ ] **Captura automática por proxy SSH** — a porta está pronta e o
       esqueleto escrito; falta o servidor intermediário. **BLOQUEADO** só
       pela infraestrutura, não pelo código. Ver docs/conectar-adaptadores.md.

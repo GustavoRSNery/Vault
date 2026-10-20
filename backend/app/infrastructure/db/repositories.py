@@ -21,6 +21,12 @@ from ...domain.audit.events import (
     AuditOutcome,
     ChainAnchor,
 )
+from ...domain.apikeys.entities import (
+    AmbienteDaChave,
+    ChaveDeApi,
+    EstadoDaChave,
+    FormatoDaChave,
+)
 from ...domain.approvals.entities import AccessRequest, RequestStatus
 from ...domain.machines.entities import (
     Application,
@@ -29,12 +35,14 @@ from ...domain.machines.entities import (
     SecretId,
 )
 from ...domain.inventory.entities import (
+    AcessoRemoto,
     Certificate,
     Checkout,
     Credential,
     CredentialStatus,
     Device,
     DeviceKind,
+    MetodoDeAcesso,
 )
 from ...domain.onboarding.entities import (
     Convite,
@@ -42,10 +50,19 @@ from ...domain.onboarding.entities import (
     PedidoDeRedefinicao,
     TipoDeConvite,
 )
+from ...domain.integrations.entities import (
+    Destino,
+    Entrega,
+    EstadoDaEntrega,
+    EstadoDoDestino,
+)
 from ...domain.sessions.entities import (
+    ConsumoDaSessao,
     EstadoDaSessao,
     EventoDeSessao,
+    OrigemDaSessao,
     Sessao,
+    TipoDeConsumo,
     TipoDeEvento,
     TipoDeSessao,
 )
@@ -62,12 +79,15 @@ from ...domain.vaults.entities import (
     VaultState,
 )
 from .models import (
+    DestinoWebhookModel,
+    EntregaWebhookModel,
     AccessRequestModel,
     ApplicationModel,
     ConfiguracaoModel,
     AuditAnchorModel,
     AuditEventModel,
     CertificateModel,
+    ChaveApiModel,
     CheckoutModel,
     ConviteModel,
     CredentialModel,
@@ -188,6 +208,29 @@ class SecretRepository:
     def add_version(self, secret_id: str, version: SecretVersion) -> None:
         self._session.add(_version_model(secret_id, version))
         self._session.flush()
+
+    def tipos_por_caminho(self) -> dict[str, tuple[str, str]]:
+        """Mapa `cofres/<cofre>/segredos/<nome>` -> (tipo, nome do cofre).
+
+        Existe para a tela de aplicações responder *que tipo* de segredo o
+        robô consome, não só o caminho. Saber que um RPA lê três senhas e uma
+        chave de API é a diferença entre uma lista de strings e uma revisão
+        de escopo que alguém consegue julgar.
+
+        Uma consulta só, com join: resolver caminho por caminho faria N+1
+        numa tela que lista dezenas deles.
+        """
+        linhas = self._session.execute(
+            select(
+                VaultModel.name,
+                SecretModel.name,
+                SecretModel.kind,
+            ).join(VaultModel, SecretModel.vault_id == VaultModel.id)
+        ).all()
+        return {
+            f"cofres/{cofre}/segredos/{segredo}": (kind, cofre)
+            for cofre, segredo, kind in linhas
+        }
 
     def save_trash_state(self, secret: Secret) -> None:
         model = self._session.get(SecretModel, secret.id)
@@ -434,6 +477,23 @@ class AuditRepository:
     def count(self) -> int:
         return self._session.scalar(select(func.count()).select_from(AuditEventModel)) or 0
 
+    def desde_sequencia(self, sequencia: int, limite: int = 200) -> list[AuditEvent]:
+        """Eventos da trilha com sequencia MAIOR que a informada.
+
+        E assim que as integracoes descobrem o que aconteceu desde a ultima
+        vez: a trilha ja e a fonte de verdade do que o sistema fez, e um
+        segundo registro paralelo divergiria dela no primeiro erro de
+        escrita. A `sequence` e monotonica e unica, entao serve de marcador
+        de leitura sem precisar de estado proprio.
+        """
+        models = self._session.scalars(
+            select(AuditEventModel)
+            .where(AuditEventModel.sequence > sequencia)
+            .order_by(AuditEventModel.sequence)
+            .limit(limite)
+        ).all()
+        return [_to_audit_event(m) for m in models]
+
     def consumo_por_ator(
         self, actor_label: str, *, desde: datetime | None = None
     ) -> list[tuple[str, int, datetime]]:
@@ -620,6 +680,7 @@ class DeviceRepository:
                 address=device.address,
                 tags=device.tags,
                 description=device.description,
+                acessos=[_de_acesso(a) for a in device.acessos],
                 is_active=device.is_active,
                 created_at=device.created_at,
             )
@@ -646,6 +707,20 @@ class DeviceRepository:
         if model is None:
             raise NotFoundError("Dispositivo nao encontrado.")
         model.is_active = active
+        self._session.flush()
+        return _to_device(model)
+
+    def save_acessos(self, device_id: str, acessos: list[AcessoRemoto]) -> Device:
+        """Substitui as formas de acesso do dispositivo.
+
+        E substituicao e nao merge: o formulario envia o conjunto completo, e
+        aplicar diferenca parcial deixaria um acesso orfao apontando para uma
+        maquina que ja nao e alcancada por ali.
+        """
+        model = self._session.get(DeviceModel, device_id)
+        if model is None:
+            raise NotFoundError("Dispositivo nao encontrado.")
+        model.acessos = [_de_acesso(a) for a in acessos]
         self._session.flush()
         return _to_device(model)
 
@@ -816,6 +891,26 @@ def _aware(momento: datetime | None) -> datetime | None:
     return momento if momento.tzinfo is not None else momento.replace(tzinfo=UTC)
 
 
+def _de_acesso(acesso: AcessoRemoto) -> dict:
+    return {
+        "metodo": str(acesso.metodo),
+        "identificador": acesso.identificador,
+        "porta": acesso.porta,
+        "usuario_sugerido": acesso.usuario_sugerido,
+        "observacao": acesso.observacao,
+    }
+
+
+def _to_acesso(bruto: dict) -> AcessoRemoto:
+    return AcessoRemoto(
+        metodo=MetodoDeAcesso(bruto.get("metodo", "outro")),
+        identificador=bruto.get("identificador", ""),
+        porta=bruto.get("porta"),
+        usuario_sugerido=bruto.get("usuario_sugerido", ""),
+        observacao=bruto.get("observacao", ""),
+    )
+
+
 def _to_device(model: DeviceModel) -> Device:
     return Device(
         name=Slug(model.name),
@@ -824,6 +919,7 @@ def _to_device(model: DeviceModel) -> Device:
         address=model.address,
         tags=list(model.tags or []),
         description=model.description,
+        acessos=[_to_acesso(a) for a in (model.acessos or [])],
         is_active=model.is_active,
         created_at=_aware(model.created_at),
         id=model.id,
@@ -1349,6 +1445,13 @@ class SessaoRepository:
                 capturado_por=capturado_por,
                 captura_automatica=automatica,
                 ip_address=sessao.ip_address,
+                origem_hostname=sessao.origem.hostname,
+                origem_user_agent=sessao.origem.user_agent,
+                origem_dispositivo=sessao.origem.dispositivo_name,
+                consumo_tipo=str(sessao.consumo.tipo),
+                consumo_nome=sessao.consumo.nome,
+                consumo_caminho=sessao.consumo.caminho,
+                consumo_pertence_a=sessao.consumo.pertence_a,
                 iniciada_em=sessao.iniciada_em,
                 ultima_atividade_em=sessao.ultima_atividade_em,
             )
@@ -1497,6 +1600,18 @@ def _to_sessao(model: SessaoModel) -> Sessao:
             for e in sorted(model.eventos, key=lambda e: e.deslocamento_ms)
         ],
         ip_address=model.ip_address,
+        origem=OrigemDaSessao(
+            ip_address=model.ip_address,
+            hostname=model.origem_hostname or "",
+            user_agent=model.origem_user_agent or "",
+            dispositivo_name=model.origem_dispositivo or "",
+        ),
+        consumo=ConsumoDaSessao(
+            tipo=TipoDeConsumo(model.consumo_tipo or "nao_identificado"),
+            nome=model.consumo_nome or "",
+            caminho=model.consumo_caminho or "",
+            pertence_a=model.consumo_pertence_a or "",
+        ),
         iniciada_em=_aware(model.iniciada_em),
         ultima_atividade_em=_aware(model.ultima_atividade_em),
         encerrada_em=_aware(model.encerrada_em),
@@ -1633,5 +1748,288 @@ def _to_pedido(model: PedidoRedefinicaoModel) -> PedidoDeRedefinicao:
         atendido_por=model.atendido_por,
         atendido_em=_aware(model.atendido_em),
         criado_em=_aware(model.criado_em),
+        id=model.id,
+    )
+
+
+class ChaveApiRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, chave: ChaveDeApi) -> ChaveDeApi:
+        existente = self._session.scalar(
+            select(ChaveApiModel).where(ChaveApiModel.name == str(chave.name))
+        )
+        if existente is not None:
+            raise ConflictError(f"Ja existe uma chave chamada {chave.name}.")
+        self._session.add(
+            ChaveApiModel(
+                id=chave.id,
+                name=str(chave.name),
+                display_name=chave.display_name,
+                servico=chave.servico,
+                ambiente=str(chave.ambiente),
+                formato=str(chave.formato),
+                nome_do_campo=chave.nome_do_campo,
+                escopo=chave.escopo,
+                usada_em=list(chave.usada_em),
+                responsavel=chave.responsavel,
+                documentacao_url=chave.documentacao_url,
+                secret_id=chave.secret_id,
+                vault_name=chave.vault_name,
+                secret_name=chave.secret_name,
+                expira_em=chave.expira_em,
+                estado=str(chave.estado),
+                criado_por=chave.criado_por,
+                created_at=chave.created_at,
+            )
+        )
+        self._session.flush()
+        return chave
+
+    def get_by_name(self, name: Slug) -> ChaveDeApi:
+        model = self._session.scalar(
+            select(ChaveApiModel).where(ChaveApiModel.name == str(name))
+        )
+        if model is None:
+            raise NotFoundError(f"Chave {name} nao encontrada.")
+        return _to_chave_api(model)
+
+    def list_all(self) -> list[ChaveDeApi]:
+        """Ordena pelo que vence primeiro; sem prazo vai para o fim."""
+        models = self._session.scalars(
+            select(ChaveApiModel).order_by(
+                ChaveApiModel.expira_em.is_(None), ChaveApiModel.expira_em
+            )
+        ).all()
+        return [_to_chave_api(m) for m in models]
+
+    def save(self, chave: ChaveDeApi) -> ChaveDeApi:
+        model = self._session.get(ChaveApiModel, chave.id)
+        if model is None:
+            raise NotFoundError("Chave nao encontrada.")
+        model.display_name = chave.display_name
+        model.servico = chave.servico
+        model.ambiente = str(chave.ambiente)
+        model.formato = str(chave.formato)
+        model.nome_do_campo = chave.nome_do_campo
+        model.escopo = chave.escopo
+        model.usada_em = list(chave.usada_em)
+        model.responsavel = chave.responsavel
+        model.documentacao_url = chave.documentacao_url
+        model.expira_em = chave.expira_em
+        model.estado = str(chave.estado)
+        model.revogada_em = chave.revogada_em
+        model.secret_id = chave.secret_id
+        model.vault_name = chave.vault_name
+        model.secret_name = chave.secret_name
+        self._session.flush()
+        return _to_chave_api(model)
+
+    def delete(self, chave_id: str) -> None:
+        model = self._session.get(ChaveApiModel, chave_id)
+        if model is None:
+            raise NotFoundError("Chave nao encontrada.")
+        self._session.delete(model)
+        self._session.flush()
+
+
+def _to_chave_api(model: ChaveApiModel) -> ChaveDeApi:
+    return ChaveDeApi(
+        name=Slug(model.name),
+        display_name=model.display_name,
+        servico=model.servico,
+        ambiente=AmbienteDaChave(model.ambiente),
+        formato=FormatoDaChave(model.formato),
+        nome_do_campo=model.nome_do_campo,
+        escopo=model.escopo,
+        usada_em=list(model.usada_em or []),
+        responsavel=model.responsavel,
+        documentacao_url=model.documentacao_url,
+        secret_id=model.secret_id,
+        vault_name=model.vault_name,
+        secret_name=model.secret_name,
+        expira_em=_aware(model.expira_em),
+        estado=EstadoDaChave(model.estado),
+        revogada_em=_aware(model.revogada_em),
+        criado_por=model.criado_por,
+        created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+class DestinoWebhookRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, destino: Destino) -> Destino:
+        if self._session.scalar(
+            select(DestinoWebhookModel).where(
+                DestinoWebhookModel.name == str(destino.name)
+            )
+        ):
+            raise ConflictError(f"Ja existe um destino chamado {destino.name}.")
+        self._session.add(
+            DestinoWebhookModel(
+                id=destino.id,
+                name=str(destino.name),
+                display_name=destino.display_name,
+                url=destino.url,
+                eventos=list(destino.eventos),
+                segredo=destino.segredo,
+                estado=str(destino.estado),
+                descricao=destino.descricao,
+                falhas_seguidas=destino.falhas_seguidas,
+                ultima_sequencia=destino.ultima_sequencia,
+                ultima_entrega_em=destino.ultima_entrega_em,
+                ultimo_erro=destino.ultimo_erro,
+                criado_por=destino.criado_por,
+                created_at=destino.created_at,
+            )
+        )
+        self._session.flush()
+        return destino
+
+    def get_by_name(self, name: Slug) -> Destino:
+        model = self._session.scalar(
+            select(DestinoWebhookModel).where(DestinoWebhookModel.name == str(name))
+        )
+        if model is None:
+            raise NotFoundError(f"Destino {name} nao encontrado.")
+        return _to_destino(model)
+
+    def list_all(self) -> list[Destino]:
+        models = self._session.scalars(
+            select(DestinoWebhookModel).order_by(DestinoWebhookModel.display_name)
+        ).all()
+        return [_to_destino(m) for m in models]
+
+    def ativos(self) -> list[Destino]:
+        models = self._session.scalars(
+            select(DestinoWebhookModel).where(DestinoWebhookModel.estado == "ativo")
+        ).all()
+        return [_to_destino(m) for m in models]
+
+    def save(self, destino: Destino) -> Destino:
+        model = self._session.get(DestinoWebhookModel, destino.id)
+        if model is None:
+            raise NotFoundError("Destino nao encontrado.")
+        model.display_name = destino.display_name
+        model.url = destino.url
+        model.eventos = list(destino.eventos)
+        model.segredo = destino.segredo
+        model.estado = str(destino.estado)
+        model.descricao = destino.descricao
+        model.falhas_seguidas = destino.falhas_seguidas
+        model.ultima_sequencia = destino.ultima_sequencia
+        model.ultima_entrega_em = destino.ultima_entrega_em
+        model.ultimo_erro = destino.ultimo_erro
+        self._session.flush()
+        return _to_destino(model)
+
+    def delete(self, destino_id: str) -> None:
+        model = self._session.get(DestinoWebhookModel, destino_id)
+        if model is None:
+            raise NotFoundError("Destino nao encontrado.")
+        self._session.delete(model)
+        self._session.flush()
+
+
+class EntregaWebhookRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, entrega: Entrega) -> Entrega:
+        self._session.add(
+            EntregaWebhookModel(
+                id=entrega.id,
+                destino_id=entrega.destino_id,
+                id_evento=entrega.id_evento,
+                tipo=entrega.tipo,
+                corpo=entrega.corpo,
+                estado=str(entrega.estado),
+                tentativas=entrega.tentativas,
+                proxima_em=entrega.proxima_em,
+                ultimo_status=entrega.ultimo_status,
+                ultimo_erro=entrega.ultimo_erro,
+                entregue_em=entrega.entregue_em,
+                created_at=entrega.created_at,
+            )
+        )
+        self._session.flush()
+        return entrega
+
+    def prontas(self, agora: datetime, limite: int = 50) -> list[Entrega]:
+        """As que ja passaram da hora de tentar de novo.
+
+        Ordena pela mais antiga: uma entrega que falhou cedo nao deve ficar
+        atras de outra que acabou de entrar na fila.
+        """
+        models = self._session.scalars(
+            select(EntregaWebhookModel)
+            .where(
+                EntregaWebhookModel.estado.in_(("pendente", "falhou")),
+                EntregaWebhookModel.proxima_em <= agora,
+            )
+            .order_by(EntregaWebhookModel.proxima_em)
+            .limit(limite)
+        ).all()
+        return [_to_entrega(m) for m in models]
+
+    def list_for_destino(self, destino_id: str, limite: int = 50) -> list[Entrega]:
+        models = self._session.scalars(
+            select(EntregaWebhookModel)
+            .where(EntregaWebhookModel.destino_id == destino_id)
+            .order_by(EntregaWebhookModel.created_at.desc())
+            .limit(limite)
+        ).all()
+        return [_to_entrega(m) for m in models]
+
+    def save(self, entrega: Entrega) -> Entrega:
+        model = self._session.get(EntregaWebhookModel, entrega.id)
+        if model is None:
+            raise NotFoundError("Entrega nao encontrada.")
+        model.estado = str(entrega.estado)
+        model.tentativas = entrega.tentativas
+        model.proxima_em = entrega.proxima_em
+        model.ultimo_status = entrega.ultimo_status
+        model.ultimo_erro = entrega.ultimo_erro
+        model.entregue_em = entrega.entregue_em
+        self._session.flush()
+        return _to_entrega(model)
+
+
+def _to_destino(model: DestinoWebhookModel) -> Destino:
+    return Destino(
+        name=Slug(model.name),
+        display_name=model.display_name,
+        url=model.url,
+        eventos=list(model.eventos or []),
+        segredo=model.segredo,
+        estado=EstadoDoDestino(model.estado),
+        descricao=model.descricao,
+        falhas_seguidas=model.falhas_seguidas,
+        ultima_sequencia=model.ultima_sequencia or 0,
+        ultima_entrega_em=_aware(model.ultima_entrega_em),
+        ultimo_erro=model.ultimo_erro,
+        criado_por=model.criado_por,
+        created_at=_aware(model.created_at),
+        id=model.id,
+    )
+
+
+def _to_entrega(model: EntregaWebhookModel) -> Entrega:
+    return Entrega(
+        destino_id=model.destino_id,
+        tipo=model.tipo,
+        corpo=model.corpo,
+        id_evento=model.id_evento,
+        estado=EstadoDaEntrega(model.estado),
+        tentativas=model.tentativas,
+        proxima_em=_aware(model.proxima_em),
+        ultimo_status=model.ultimo_status,
+        ultimo_erro=model.ultimo_erro,
+        entregue_em=_aware(model.entregue_em),
+        created_at=_aware(model.created_at),
         id=model.id,
     )

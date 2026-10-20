@@ -12,19 +12,26 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ...domain.access.policy import Capability, evaluate
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
 from ...domain.inventory.entities import (
+    AcessoRemoto,
     Certificate,
     Credential,
     Device,
     DeviceKind,
+    MetodoDeAcesso,
+    montar_arquivo_rdp,
 )
-from ...domain.shared.errors import DomainError, PermissionDeniedError
+from ...domain.shared.errors import (
+    DomainError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from ...domain.shared.value_objects import PolicyPath, Slug
 from ...infrastructure.db.repositories import (
     AuditRepository,
@@ -62,6 +69,7 @@ class DispositivoResponse(BaseModel):
     address: str
     tags: list[str]
     description: str
+    acessos: list[AcessoResponse]
     is_active: bool
     credenciais: int
     created_at: datetime
@@ -74,6 +82,38 @@ class CriarDispositivoRequest(BaseModel):
     address: str = ""
     tags: list[str] = Field(default_factory=list)
     description: str = ""
+
+
+class AcessoResponse(BaseModel):
+    """Uma forma de alcançar o dispositivo.
+
+    O identificador é visível de propósito: ele diz *onde* a máquina está,
+    não *como* entrar nela. A senha continua no cofre, mascarada.
+    """
+
+    metodo: str
+    identificador: str
+    porta: int | None
+    usuario_sugerido: str
+    observacao: str
+    # A tela usa estes dois para escolher entre botão de download, link ou
+    # só copiar — em vez de deduzir pelo nome do método.
+    suporta_arquivo_rdp: bool
+    link: str | None
+
+
+class AcessoPayload(BaseModel):
+    metodo: MetodoDeAcesso
+    identificador: str = Field(min_length=1, max_length=200)
+    porta: int | None = Field(default=None, ge=1, le=65535)
+    usuario_sugerido: str = Field(default="", max_length=100)
+    observacao: str = Field(default="", max_length=300)
+
+
+class DefinirAcessosRequest(BaseModel):
+    """Conjunto completo. É substituição, não merge."""
+
+    acessos: list[AcessoPayload] = Field(default_factory=list, max_length=10)
 
 
 class CustodiaResponse(BaseModel):
@@ -236,18 +276,7 @@ def listar_dispositivos(
     todos = devices.list_all()
     permitidos = _visiveis(policies, current, [d.path for d in todos])
     return [
-        DispositivoResponse(
-            id=d.id,
-            name=str(d.name),
-            display_name=d.display_name,
-            kind=str(d.kind),
-            address=d.address,
-            tags=d.tags,
-            description=d.description,
-            is_active=d.is_active,
-            credenciais=len(credentials.list_for_device(d.id)),
-            created_at=d.created_at,
-        )
+        _dispositivo_response(d, credentials)
         for d in todos
         if str(d.path) in permitidos
     ]
@@ -263,6 +292,7 @@ def criar_dispositivo(
     payload: CriarDispositivoRequest,
     current: Annotated[CurrentUser, Depends(get_current_user)],
     devices: Annotated[DeviceRepository, Depends(get_devices)],
+    credentials: Annotated[CredentialRepository, Depends(get_credentials)],
     policies: Annotated[PolicyRepository, Depends(get_policies)],
     audit: Annotated[AuditRepository, Depends(get_audit)],
     db: Annotated[Session, Depends(get_db)],
@@ -283,18 +313,7 @@ def criar_dispositivo(
     audit.append(
         _evento(current, AuditAction.DEVICE_CREATED, str(dispositivo.path))
     )
-    return DispositivoResponse(
-        id=dispositivo.id,
-        name=str(dispositivo.name),
-        display_name=dispositivo.display_name,
-        kind=str(dispositivo.kind),
-        address=dispositivo.address,
-        tags=dispositivo.tags,
-        description=dispositivo.description,
-        is_active=dispositivo.is_active,
-        credenciais=0,
-        created_at=dispositivo.created_at,
-    )
+    return _dispositivo_response(dispositivo, credentials)
 
 
 # --------------------------------------------------------------- credenciais
@@ -549,7 +568,324 @@ def criar_certificado(
     return _certificado_response(certificado)
 
 
+@router.put(
+    "/dispositivos/{device_name}/acessos",
+    response_model=DispositivoResponse,
+    summary="Definir formas de acesso remoto",
+)
+def definir_acessos(
+    device_name: str,
+    payload: DefinirAcessosRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    devices: Annotated[DeviceRepository, Depends(get_devices)],
+    credentials: Annotated[CredentialRepository, Depends(get_credentials)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> DispositivoResponse:
+    """Substitui as formas de alcançar a máquina.
+
+    Os identificadores (ID do AnyDesk, host do RDP) são dados comuns, não
+    segredos: eles dizem onde a máquina está, e quem os tem sem a senha não
+    entra. Mascará-los atrapalharia quem precisa ditar o número no telefone,
+    sem proteger nada.
+    """
+    dispositivo = devices.get_by_name(Slug(device_name))
+    _exigir(
+        current, policies, audit, db, dispositivo.path, Capability.UPDATE,
+        "Sem permissão para alterar os acessos deste dispositivo.",
+    )
+
+    acessos = [
+        AcessoRemoto(
+            metodo=a.metodo,
+            identificador=a.identificador,
+            porta=a.porta,
+            usuario_sugerido=a.usuario_sugerido,
+            observacao=a.observacao,
+        )
+        for a in payload.acessos
+    ]
+    salvo = devices.save_acessos(dispositivo.id, acessos)
+    audit.append(
+        _evento(
+            current, AuditAction.DEVICE_ACCESS_UPDATED, str(dispositivo.path),
+            reason=f"Métodos: {', '.join(str(a.metodo) for a in acessos) or '—'}.",
+        )
+    )
+    return _dispositivo_response(salvo, credentials)
+
+
+@router.get(
+    "/dispositivos/{device_name}/rdp",
+    summary="Baixar arquivo .rdp",
+    response_class=Response,
+)
+def baixar_rdp(
+    device_name: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    devices: Annotated[DeviceRepository, Depends(get_devices)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Gera um arquivo .rdp apontado para a máquina, **sem a senha**.
+
+    Senha dentro de arquivo é senha no disco de quem baixou, fora do cofre e
+    fora da auditoria. A pessoa revela a senha no cofre — o que vira evento —
+    e cola na janela do RDP, que a pede.
+
+    Cada download é registrado: saber quem abriu conexão com qual máquina é
+    metade do valor de um cofre de acesso.
+    """
+    dispositivo = devices.get_by_name(Slug(device_name))
+    _exigir(
+        current, policies, audit, db, dispositivo.path, Capability.READ,
+        "Sem permissão para acessar este dispositivo.",
+    )
+
+    rdp = next(
+        (a for a in dispositivo.acessos if a.metodo is MetodoDeAcesso.RDP), None
+    )
+    if rdp is None:
+        raise NotFoundError(
+            "Este dispositivo não tem acesso RDP cadastrado."
+        )
+
+    conteudo = montar_arquivo_rdp(
+        rdp.identificador, usuario=rdp.usuario_sugerido, porta=rdp.porta
+    )
+    audit.append(
+        _evento(
+            current, AuditAction.REMOTE_ACCESS_STARTED, str(dispositivo.path),
+            reason=f"Arquivo .rdp gerado para {rdp.identificador}.",
+        )
+    )
+    return Response(
+        content=conteudo,
+        media_type="application/x-rdp",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{dispositivo.name}.rdp"'
+            )
+        },
+    )
+
+
+@router.post(
+    "/dispositivos/{device_name}/acesso-registrado",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Registrar uso de acesso remoto",
+)
+def registrar_acesso(
+    device_name: str,
+    metodo: Annotated[MetodoDeAcesso, Query()],
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    devices: Annotated[DeviceRepository, Depends(get_devices)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """Registra que alguém usou um acesso que o sistema não intermedia.
+
+    AnyDesk e Google Remote Desktop acontecem fora daqui: o Vault entrega o
+    identificador e perde a pista. Sem este registro, a trilha teria um
+    buraco justamente nos acessos mais informais — que são os que mais
+    importam numa revisão.
+    """
+    dispositivo = devices.get_by_name(Slug(device_name))
+    _exigir(
+        current, policies, audit, db, dispositivo.path, Capability.READ,
+        "Sem permissão para acessar este dispositivo.",
+    )
+    audit.append(
+        _evento(
+            current, AuditAction.REMOTE_ACCESS_STARTED, str(dispositivo.path),
+            reason=f"Acesso por {metodo} iniciado pelo usuário.",
+        )
+    )
+
+
+@router.get(
+    "/certificados/{nome}/exportar",
+    summary="Exportar certificado em JSON",
+)
+def exportar_certificado(
+    nome: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    certificates: Annotated[CertificateRepository, Depends(get_certificates)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Metadados do certificado em JSON, para copiar ou salvar.
+
+    **Sem a chave privada**: ela, quando guardada, é segredo do cofre e sai
+    pela rota de revelar, que audita. Um "exportar tudo" que incluísse a
+    chave transformaria um clique de conveniência num vazamento.
+    """
+    certificado = certificates.get_by_name(Slug(nome))
+    _exigir(
+        current, policies, audit, db, certificado.path, Capability.READ,
+        "Sem permissão para exportar este certificado.",
+    )
+    audit.append(
+        _evento(
+            current, AuditAction.CERTIFICATE_EXPORTED, str(certificado.path),
+            reason="Metadados exportados (sem chave privada).",
+        )
+    )
+    return {
+        "nome": str(certificado.name),
+        "nome_visivel": certificado.display_name,
+        "titular": certificado.subject,
+        "emissor": certificado.issuer,
+        "serial": certificado.serial,
+        "responsavel": certificado.owner_label,
+        "valido_de": certificado.not_before.isoformat(),
+        "valido_ate": certificado.not_after.isoformat(),
+        "dias_restantes": certificado.days_remaining(),
+        "estado": str(certificado.state()),
+        "descricao": certificado.description,
+        "observacao": (
+            "A chave privada não é exportada. Quando guardada, ela é segredo "
+            "do cofre e sai pela rota de revelar, que registra auditoria."
+        ),
+    }
+
+
+@router.delete(
+    "/certificados/{nome}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Excluir certificado",
+)
+def excluir_certificado(
+    nome: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    certificates: Annotated[CertificateRepository, Depends(get_certificates)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> None:
+    """Remove o certificado do inventário.
+
+    O segredo com a chave privada, se houver, **não** é apagado: são coisas
+    separadas, e um clique que removesse os dois ao mesmo tempo apagaria o
+    material criptográfico junto com o lembrete de que ele existia.
+    """
+    certificado = certificates.get_by_name(Slug(nome))
+    _exigir(
+        current, policies, audit, db, certificado.path, Capability.DELETE,
+        "Sem permissão para excluir este certificado.",
+    )
+    certificates.delete(certificado.id)
+    audit.append(
+        _evento(
+            current, AuditAction.CERTIFICATE_DELETED, str(certificado.path),
+            reason=(
+                f"{certificado.display_name}, emissor {certificado.issuer}. "
+                "A chave privada no cofre não foi apagada."
+            ),
+        )
+    )
+
+
+@router.get(
+    "/credenciais/{credential_id}/exportar",
+    summary="Exportar credencial em JSON",
+)
+def exportar_credencial(
+    credential_id: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    devices: Annotated[DeviceRepository, Depends(get_devices)],
+    credentials: Annotated[CredentialRepository, Depends(get_credentials)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Governo da credencial em JSON. **Sem o valor da senha.**
+
+    Rotação, custódia e histórico são o que alguém precisa para auditar ou
+    migrar o inventário. O valor sai pela rota de revelar, uma por vez, com
+    auditoria — e não num JSON que se copia inteiro.
+    """
+    credencial = credentials.get(credential_id)
+    _exigir(
+        current, policies, audit, db, credencial.path, Capability.READ,
+        "Sem permissão para exportar esta credencial.",
+    )
+    dispositivo = _dispositivo_de(devices, credencial)
+    audit.append(
+        _evento(
+            current, AuditAction.CREDENTIAL_EXPORTED, str(credencial.path),
+            reason="Governo exportado (sem o valor).",
+        )
+    )
+    aberta = credencial.open_checkout
+    return {
+        "nome": str(credencial.name),
+        "dispositivo": dispositivo.display_name if dispositivo else None,
+        "endereco": dispositivo.address if dispositivo else None,
+        "usuario": credencial.username,
+        "descricao": credencial.description,
+        "rotacao_dias": credencial.rotation_days,
+        "ultima_rotacao": (
+            credencial.last_rotated_at.isoformat()
+            if credencial.last_rotated_at
+            else None
+        ),
+        "vence_em": credencial.due_at.isoformat() if credencial.due_at else None,
+        "atrasada": credencial.is_overdue(),
+        "situacao": str(credencial.status),
+        "custodia_aberta": (
+            {
+                "com": aberta.user_label,
+                "desde": aberta.taken_at.isoformat(),
+                "ate": aberta.due_at.isoformat(),
+                "motivo": aberta.reason,
+            }
+            if aberta
+            else None
+        ),
+        "historico_custodias": len(credencial.checkouts),
+        "observacao": (
+            "O valor da senha não é exportado. Ele sai pela rota de revelar, "
+            "uma por vez, com registro de auditoria."
+        ),
+    }
+
+
 # ----------------------------------------------------------------- resposta
+
+
+def _acesso_response(acesso: AcessoRemoto) -> AcessoResponse:
+    return AcessoResponse(
+        metodo=str(acesso.metodo),
+        identificador=acesso.identificador,
+        porta=acesso.porta,
+        usuario_sugerido=acesso.usuario_sugerido,
+        observacao=acesso.observacao,
+        suporta_arquivo_rdp=acesso.suporta_arquivo_rdp,
+        link=acesso.link(),
+    )
+
+
+def _dispositivo_response(
+    d: Device, credentials: CredentialRepository
+) -> DispositivoResponse:
+    return DispositivoResponse(
+        id=d.id,
+        name=str(d.name),
+        display_name=d.display_name,
+        kind=str(d.kind),
+        address=d.address,
+        tags=d.tags,
+        description=d.description,
+        acessos=[_acesso_response(a) for a in d.acessos],
+        is_active=d.is_active,
+        credenciais=len(credentials.list_for_device(d.id)),
+        created_at=d.created_at,
+    )
 
 
 def _dispositivo_de(

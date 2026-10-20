@@ -42,6 +42,62 @@ class CredentialStatus(StrEnum):
     RETIRED = "aposentada"
 
 
+class MetodoDeAcesso(StrEnum):
+    """Como se alcança o dispositivo remotamente."""
+
+    RDP = "rdp"
+    SSH = "ssh"
+    ANYDESK = "anydesk"
+    GOOGLE_REMOTE = "google_remote"
+    VNC = "vnc"
+    TEAMVIEWER = "teamviewer"
+    OUTRO = "outro"
+
+
+@dataclass(frozen=True, slots=True)
+class AcessoRemoto:
+    """Uma forma de alcançar o dispositivo.
+
+    O `identificador` é público por natureza: o ID do AnyDesk ou o host do
+    RDP dizem *onde* a máquina está, não *como* entrar nela. A senha continua
+    no cofre, cifrada — e é ela que autentica.
+
+    Tratar o identificador como segredo mascarado atrapalharia o uso diário
+    (quem liga para o colega precisa ditar o número) sem proteger nada: quem
+    tem o ID e não tem a senha não entra.
+    """
+
+    metodo: MetodoDeAcesso
+    identificador: str
+    porta: int | None = None
+    usuario_sugerido: str = ""
+    observacao: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.identificador.strip():
+            raise ValidationError(
+                "Informe o identificador do acesso: sem ele não há como "
+                "alcançar a máquina."
+            )
+        if self.porta is not None and not 1 <= self.porta <= 65535:
+            raise ValidationError("A porta deve ficar entre 1 e 65535.")
+
+    @property
+    def suporta_arquivo_rdp(self) -> bool:
+        return self.metodo is MetodoDeAcesso.RDP
+
+    @property
+    def abre_por_link(self) -> bool:
+        """Métodos que o navegador alcança sem baixar nada."""
+        return self.metodo is MetodoDeAcesso.GOOGLE_REMOTE
+
+    def link(self) -> str | None:
+        """URL para abrir o acesso, quando existir uma."""
+        if self.metodo is MetodoDeAcesso.GOOGLE_REMOTE:
+            return "https://remotedesktop.google.com/access"
+        return None
+
+
 @dataclass(slots=True)
 class Device:
     """Equipamento ou serviço ao qual credenciais pertencem."""
@@ -52,6 +108,7 @@ class Device:
     address: str = ""
     tags: list[str] = field(default_factory=list)
     description: str = ""
+    acessos: list[AcessoRemoto] = field(default_factory=list)
     is_active: bool = True
     created_at: datetime = field(default_factory=utcnow)
     id: str = field(default_factory=new_id)
@@ -61,6 +118,16 @@ class Device:
             raise ValidationError("O dispositivo precisa de um nome visível.")
         # Tag duplicada só polui o filtro da tela.
         self.tags = sorted({t.strip().lower() for t in self.tags if t.strip()})
+        # Dois acessos pelo mesmo método confundem quem vai conectar: qual
+        # dos dois é o certo? Mantém o primeiro informado.
+        vistos: set[str] = set()
+        unicos: list[AcessoRemoto] = []
+        for acesso in self.acessos:
+            if str(acesso.metodo) in vistos:
+                continue
+            vistos.add(str(acesso.metodo))
+            unicos.append(acesso)
+        self.acessos = unicos
 
     @property
     def path(self) -> PolicyPath:
@@ -298,3 +365,42 @@ class Certificate:
 
     def is_expired(self, now: datetime | None = None) -> bool:
         return self.state(now) is CertificateState.EXPIRED
+
+
+
+def montar_arquivo_rdp(
+    endereco: str, *, usuario: str = "", porta: int | None = None
+) -> str:
+    """Monta um arquivo .rdp apontado para o host, SEM a senha.
+
+    É o padrão que o Segura usa, e a razão é simples: senha dentro de arquivo
+    é senha no disco de quem baixou, fora do cofre e fora da auditoria. A
+    pessoa revela a senha no cofre (o que vira evento) e cola na janela do
+    RDP.
+
+    O arquivo também não embute nada que identifique o Vault — ele é só uma
+    conexão apontada.
+    """
+    if not endereco.strip():
+        raise ValidationError("Informe o endereço do RDP.")
+
+    alvo = endereco.strip()
+    if porta is not None and porta != 3389:
+        alvo = f"{alvo}:{porta}"
+
+    linhas = [
+        "screen mode id:i:2",
+        "use multimon:i:0",
+        f"full address:s:{alvo}",
+        # Pede a credencial na janela do RDP em vez de guardá-la.
+        "prompt for credentials:i:1",
+        "promptcredentialonce:i:0",
+        "authentication level:i:2",
+        "redirectclipboard:i:1",
+        # Não redireciona discos: o copiar-colar basta, e montar o disco
+        # local numa máquina de produção é superfície de ataque sem ganho.
+        "drivestoredirect:s:",
+    ]
+    if usuario.strip():
+        linhas.append(f"username:s:{usuario.strip()}")
+    return "\r\n".join(linhas) + "\r\n"

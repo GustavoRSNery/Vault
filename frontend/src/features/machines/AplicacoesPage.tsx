@@ -52,7 +52,13 @@ type Lease = {
   minutos_restantes: number | null
 }
 
-type LinhaConsumo = { caminho: string; leituras: number; ultima: string }
+type LinhaConsumo = {
+  caminho: string
+  leituras: number
+  ultima: string
+  tipo: string
+  cofre: string
+}
 
 type Consumo = {
   aplicacao: string
@@ -61,6 +67,34 @@ type Consumo = {
   negados: LinhaConsumo[]
   caminhos_no_escopo: string[]
   nunca_lidos: string[]
+  por_tipo: Record<string, number>
+}
+
+/**
+ * Rótulos dos tipos de segredo.
+ *
+ * O tipo responde "que espécie de credencial este robô usa?" — a diferença
+ * entre uma lista de caminhos, que ninguém julga, e uma revisão de escopo
+ * que alguém consegue conferir em segundos.
+ */
+const ROTULO_TIPO_SEGREDO: Record<string, string> = {
+  senha: 'senha',
+  chave_api: 'chave de API',
+  chave_ssh: 'chave SSH',
+  certificado: 'certificado',
+  token: 'token',
+  nota: 'nota',
+  desconhecido: 'desconhecido',
+}
+
+const TOM_DO_TIPO: Record<string, 'brand' | 'warning' | 'muted'> = {
+  senha: 'brand',
+  chave_api: 'warning',
+  chave_ssh: 'warning',
+  certificado: 'brand',
+  token: 'warning',
+  nota: 'muted',
+  desconhecido: 'muted',
 }
 
 type CredencialVencendo = {
@@ -696,6 +730,26 @@ function CartaoConsumo({ consumo }: { consumo: Consumo }) {
           </Alerta>
         )}
 
+        {Object.keys(consumo.por_tipo ?? {}).length > 0 && (
+          <div className="col" style={{ gap: 8 }}>
+            <span className="help" style={{ fontWeight: 600 }}>
+              O que este robô usa
+            </span>
+            <div className="row wrap" style={{ gap: 8 }}>
+              {Object.entries(consumo.por_tipo).map(([tipo, quantos]) => (
+                <Badge key={tipo} tom={TOM_DO_TIPO[tipo] ?? 'muted'}>
+                  {quantos} {ROTULO_TIPO_SEGREDO[tipo] ?? tipo}
+                  {quantos === 1 ? '' : 's'}
+                </Badge>
+              ))}
+            </div>
+            <span className="help">
+              Conta caminhos distintos, não leituras: ler a mesma senha mil
+              vezes continua sendo uma senha.
+            </span>
+          </div>
+        )}
+
         <div className="col" style={{ gap: 8 }}>
           <span className="help" style={{ fontWeight: 600 }}>
             Mais lidos
@@ -708,6 +762,7 @@ function CartaoConsumo({ consumo }: { consumo: Consumo }) {
                 <thead>
                   <tr>
                     <th>Caminho</th>
+                    <th>Tipo</th>
                     <th>Leituras</th>
                     <th>Última</th>
                   </tr>
@@ -717,6 +772,11 @@ function CartaoConsumo({ consumo }: { consumo: Consumo }) {
                     <tr key={l.caminho}>
                       <td>
                         <code className="secret-sm">{l.caminho}</code>
+                      </td>
+                      <td>
+                        <Badge tom={TOM_DO_TIPO[l.tipo] ?? 'muted'}>
+                          {ROTULO_TIPO_SEGREDO[l.tipo] ?? l.tipo}
+                        </Badge>
                       </td>
                       <td className="secret-sm strong">{l.leituras}</td>
                       <td className="muted">{formatarDataHora(l.ultima)}</td>

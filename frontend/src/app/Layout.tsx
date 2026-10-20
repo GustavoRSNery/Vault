@@ -9,6 +9,7 @@ const ITENS = [
   { para: '/dispositivos', rotulo: 'Dispositivos', fim: false },
   { para: '/credenciais', rotulo: 'Credenciais', fim: false },
   { para: '/certificados', rotulo: 'Certificados', fim: false },
+  { para: '/chaves-api', rotulo: 'Chaves de API', fim: false },
   { para: '/solicitacoes', rotulo: 'Solicitações', fim: false },
   { para: '/sessoes', rotulo: 'Sessões', fim: true },
   { para: '/sessoes/gravacoes', rotulo: 'Gravações', fim: false },
@@ -21,7 +22,9 @@ const ITENS = [
 const ITENS_ADMIN = [
   { para: '/admin/usuarios', rotulo: 'Pessoas', fim: false },
   { para: '/admin/politicas', rotulo: 'Políticas', fim: false },
+  { para: '/admin/convites', rotulo: 'Convites', fim: false },
   { para: '/admin/aplicacoes', rotulo: 'Aplicações', fim: false },
+  { para: '/admin/integracoes', rotulo: 'Integrações', fim: false },
   { para: '/admin/configuracao', rotulo: 'Configurações', fim: false },
 ]
 

@@ -48,10 +48,17 @@ services:
       db:
         condition: service_healthy
     # O banco sobe vazio na primeira vez: cria as tabelas, o administrador e
-    # os dados de demonstração. Os três passos são idempotentes.
+    # os dados de demonstração. Os passos são idempotentes.
+    #
+    # `evoluir_schema` vem primeiro e não é opcional: `create_all` cria
+    # tabela que falta mas NUNCA altera tabela que já existe, então uma
+    # coluna nova não nasce em banco com dados e a API sobe para quebrar na
+    # primeira consulta. Já aconteceu com `dispositivos.acessos`.
     command: >
-      sh -c "python -m app.tools.criar_admin ana.souza@exemplo.com.br SenhaForteDeDev2026 &&
+      sh -c "python -m app.tools.evoluir_schema &&
+             python -m app.tools.criar_admin ana.souza@exemplo.com.br SenhaForteDeDev2026 &&
              python -m app.tools.popular_demo &&
+             python -m app.tools.popular_inventario &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8777:8000"

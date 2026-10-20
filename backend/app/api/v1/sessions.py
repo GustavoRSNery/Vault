@@ -34,6 +34,9 @@ from ...application.ports.sessions import (
 from ...domain.access.policy import Capability, evaluate
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
 from ...domain.sessions.entities import (
+    ConsumoDaSessao,
+    OrigemDaSessao,
+    TipoDeConsumo,
     EstadoDaSessao,
     EventoDeSessao,
     Sessao,
@@ -71,6 +74,33 @@ class EventoResponse(BaseModel):
     conteudo: str
 
 
+class OrigemResponse(BaseModel):
+    """De onde a sessão partiu."""
+
+    ip_address: str | None
+    hostname: str
+    user_agent: str
+    dispositivo_name: str
+    # Uma linha pronta para a tela, do mais específico ao menos.
+    descricao: str
+    identificada: bool
+
+
+class ConsumoResponse(BaseModel):
+    """O que a sessão consumiu do cofre.
+
+    **Nunca carrega o valor do segredo** — só o nome e o caminho. Quem
+    precisa do valor passa pela rota de revelar, que registra evento.
+    """
+
+    tipo: str
+    nome: str
+    caminho: str
+    pertence_a: str
+    descricao: str
+    saiu_do_cofre: bool
+
+
 class SessaoResponse(BaseModel):
     id: str
     usuario_label: str
@@ -91,6 +121,10 @@ class SessaoResponse(BaseModel):
     # merecem a mesma confiança numa investigação.
     capturado_por: str
     captura_automatica: bool
+    # De onde partiu e o que consumiu — duas perguntas diferentes que a
+    # revisão faz sobre a mesma sessão.
+    origem: OrigemResponse
+    consumo: ConsumoResponse
 
 
 class DetalheSessaoResponse(SessaoResponse):
@@ -105,6 +139,15 @@ class AbrirSessaoRequest(BaseModel):
     alvo: str = Field(min_length=1, max_length=300)
     motivo: str = Field(default="", max_length=1000)
     segredo_path: str | None = Field(default=None, max_length=256)
+    # De onde parte. O IP vem do servidor; estes vêm de quem abre, porque só
+    # o cliente sabe o nome da própria máquina.
+    origem_hostname: str = Field(default="", max_length=253)
+    origem_dispositivo: str = Field(default="", max_length=64)
+    # O que está sendo usado para entrar. O caminho identifica o segredo
+    # sem revelá-lo: é o que a auditoria precisa e o máximo que ela deve ver.
+    consumo_tipo: TipoDeConsumo = TipoDeConsumo.NAO_IDENTIFICADO
+    consumo_nome: str = Field(default="", max_length=200)
+    consumo_pertence_a: str = Field(default="", max_length=200)
 
 
 class RegistrarEventoRequest(BaseModel):
@@ -200,6 +243,24 @@ def abrir(
         motivo=payload.motivo,
         segredo_path=payload.segredo_path,
         ip_address=current.ip_address,
+        origem=OrigemDaSessao(
+            ip_address=current.ip_address,
+            hostname=payload.origem_hostname,
+            # O user-agent vem do servidor: o cliente poderia mentir, mas
+            # mentir no próprio cabeçalho é outro tipo de problema, e aqui
+            # pelo menos o valor é o mesmo que a auditoria registrou.
+            user_agent=current.user_agent or "",
+            dispositivo_name=payload.origem_dispositivo,
+        ),
+        consumo=ConsumoDaSessao(
+            tipo=payload.consumo_tipo,
+            nome=payload.consumo_nome,
+            # O caminho do segredo é o que já veio em `segredo_path`: evita
+            # duas fontes para o mesmo dado, que divergiriam na primeira
+            # chamada que preenchesse só uma delas.
+            caminho=payload.segredo_path or "",
+            pertence_a=payload.consumo_pertence_a,
+        ),
     )
     captura.abrir(sessao.id, sessao.alvo)
     sessoes.add(sessao, captura.nome, captura.captura_automatica)
@@ -463,4 +524,33 @@ def _resposta(
         minha=sessao.usuario_id == current.id,
         capturado_por=capturado_por,
         captura_automatica=automatica,
+        origem=_origem_response(sessao),
+        consumo=_consumo_response(sessao),
+    )
+
+
+def _origem_response(sessao: Sessao) -> OrigemResponse:
+    return OrigemResponse(
+        ip_address=sessao.origem.ip_address,
+        hostname=sessao.origem.hostname,
+        user_agent=sessao.origem.user_agent,
+        dispositivo_name=sessao.origem.dispositivo_name,
+        descricao=sessao.origem.descricao,
+        identificada=sessao.origem.identificada,
+    )
+
+
+def _consumo_response(sessao: Sessao) -> ConsumoResponse:
+    """Nome e caminho, nunca o valor.
+
+    O caminho responde "qual segredo foi usado?" sem revelar nada: quem
+    quiser o valor passa pela rota de revelar, que registra evento próprio.
+    """
+    return ConsumoResponse(
+        tipo=str(sessao.consumo.tipo),
+        nome=sessao.consumo.nome,
+        caminho=sessao.consumo.caminho,
+        pertence_a=sessao.consumo.pertence_a,
+        descricao=sessao.consumo.descricao,
+        saiu_do_cofre=sessao.consumo.saiu_do_cofre,
     )

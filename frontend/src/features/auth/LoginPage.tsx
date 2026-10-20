@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiError } from '@/shared/api/client'
 import { Alerta, Botao, Campo } from '@/shared/ui/components'
 import { useAuth } from './AuthContext'
@@ -90,6 +91,14 @@ export function LoginPage() {
           >
             Voltar
           </Botao>
+        )}
+
+        {/* Só fora do desafio de MFA: quem já passou da senha não esqueceu
+            dela, e oferecer recuperação aqui confundiria o fluxo. */}
+        {!pedindoMfa && (
+          <p className="help" style={{ marginTop: 18, textAlign: 'center' }}>
+            <Link to="/recuperar">Esqueci minha senha</Link>
+          </p>
         )}
       </form>
     </div>

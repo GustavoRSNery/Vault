@@ -85,6 +85,35 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return (await response.json()) as T
 }
 
+/**
+ * Baixa uma resposta de texto (ex.: arquivo .rdp) pela sessão atual.
+ *
+ * Existe separado de `request` porque o corpo não é JSON e as quebras de
+ * linha importam: o cliente de RDP espera CRLF. Abrir a URL numa aba nova
+ * não serviria — aba nova não carrega o cabeçalho Authorization, e resolver
+ * isso com token na query string colocaria credencial no histórico do
+ * navegador e no log do servidor.
+ */
+export async function requestText(path: string, retrying = false): Promise<string> {
+  const headers: Record<string, string> = {}
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+
+  const response = await fetch(`/api/v1${path}`, { headers })
+
+  if (response.status === 401 && !retrying && refreshToken) {
+    const renovou = await tryRefresh()
+    if (renovou) return requestText(path, true)
+  }
+  if (response.status === 401) {
+    setTokens(null)
+    onUnauthenticated?.()
+  }
+  if (!response.ok) throw await toApiError(response)
+
+  return response.text()
+}
+
+
 async function tryRefresh(): Promise<boolean> {
   try {
     const response = await fetch('/api/v1/auth/refresh', {

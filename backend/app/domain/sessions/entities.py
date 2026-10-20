@@ -30,7 +30,7 @@ silêncio.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 
@@ -54,6 +54,101 @@ class TipoDeSessao(StrEnum):
     BANCO = "banco_de_dados"
     WEB = "web"
     OUTRO = "outro"
+
+
+class TipoDeConsumo(StrEnum):
+    """O que a sessão usou para autenticar no alvo."""
+
+    CREDENCIAL = "credencial"
+    CHAVE_API = "chave_api"
+    CERTIFICADO = "certificado"
+    # A pessoa entrou com o que ela mesma sabe; nada saiu do cofre.
+    PROPRIA = "propria"
+    NAO_IDENTIFICADO = "nao_identificado"
+
+
+@dataclass(frozen=True, slots=True)
+class OrigemDaSessao:
+    """De onde a sessão partiu.
+
+    Responde "qual máquina?" sem depender do IP, que muda, se repete atrás
+    de NAT e não distingue duas pessoas na mesma rede. O `hostname` e o
+    `dispositivo_name` são o que permite dizer *qual* estação abriu a
+    sessão — e é a pergunta que alguém faz quando um acesso estranho
+    aparece na revisão.
+    """
+
+    ip_address: str | None = None
+    hostname: str = ""
+    user_agent: str = ""
+    # Quando a origem é uma máquina do próprio inventário, o identificador
+    # dela. Liga a sessão ao dispositivo em vez de deixar um IP solto.
+    dispositivo_name: str = ""
+
+    @property
+    def descricao(self) -> str:
+        """Uma linha para a tela, do mais específico ao menos."""
+        if self.dispositivo_name:
+            return self.dispositivo_name
+        if self.hostname:
+            return self.hostname
+        if self.ip_address:
+            return self.ip_address
+        return "origem não identificada"
+
+    @property
+    def identificada(self) -> bool:
+        return bool(self.dispositivo_name or self.hostname or self.ip_address)
+
+
+@dataclass(frozen=True, slots=True)
+class ConsumoDaSessao:
+    """O que a sessão consumiu do cofre.
+
+    **Guarda o caminho, nunca o valor.** Saber que a sessão usou
+    `cofres/infra/segredos/senha-root` responde à auditoria sem revelar
+    nada; quem quiser o valor passa pela rota de revelar, que registra
+    evento próprio. Um campo de valor aqui transformaria a lista de sessões
+    num despejo de segredos.
+    """
+
+    tipo: TipoDeConsumo = TipoDeConsumo.NAO_IDENTIFICADO
+    # Nome legível do que foi usado: "senha-root", "SEFAZ NF-e".
+    nome: str = ""
+    # Caminho de política do segredo, quando houver.
+    caminho: str = ""
+    # Quem é o dono do segredo consumido (dispositivo, serviço).
+    pertence_a: str = ""
+
+    def __post_init__(self) -> None:
+        if self.tipo is not TipoDeConsumo.NAO_IDENTIFICADO and not self.nome.strip():
+            raise ValidationError(
+                "Consumo identificado precisa do nome do que foi usado: sem "
+                "ele o registro não responde à pergunta da auditoria."
+            )
+
+    @property
+    def descricao(self) -> str:
+        if self.tipo is TipoDeConsumo.PROPRIA:
+            return "Credencial da própria pessoa"
+        if self.tipo is TipoDeConsumo.NAO_IDENTIFICADO:
+            return "Não identificado"
+        rotulos = {
+            TipoDeConsumo.CREDENCIAL: "Credencial",
+            TipoDeConsumo.CHAVE_API: "Chave de API",
+            TipoDeConsumo.CERTIFICADO: "Certificado",
+        }
+        base = f"{rotulos[self.tipo]}: {self.nome}"
+        return f"{base} ({self.pertence_a})" if self.pertence_a else base
+
+    @property
+    def saiu_do_cofre(self) -> bool:
+        """Se um segredo guardado foi usado — o que a revisão quer olhar."""
+        return self.tipo in (
+            TipoDeConsumo.CREDENCIAL,
+            TipoDeConsumo.CHAVE_API,
+            TipoDeConsumo.CERTIFICADO,
+        )
 
 
 class EstadoDaSessao(StrEnum):
@@ -112,6 +207,10 @@ class Sessao:
     estado: EstadoDaSessao = EstadoDaSessao.ATIVA
     eventos: list[EventoDeSessao] = field(default_factory=list)
     ip_address: str | None = None
+    # De onde partiu e o que consumiu. Separados de propósito: são duas
+    # perguntas diferentes que a revisão faz sobre a mesma sessão.
+    origem: OrigemDaSessao = field(default_factory=OrigemDaSessao)
+    consumo: ConsumoDaSessao = field(default_factory=ConsumoDaSessao)
     iniciada_em: datetime = field(default_factory=utcnow)
     ultima_atividade_em: datetime = field(default_factory=utcnow)
     encerrada_em: datetime | None = None
@@ -125,6 +224,11 @@ class Sessao:
                 "A sessão precisa de um alvo. Sessão sem alvo é registro que "
                 "não responde a pergunta nenhuma depois."
             )
+        # O IP solto continua existindo para compatibilidade; se veio só ele,
+        # a origem herda — senão a tela mostraria "não identificada" tendo o
+        # dado à mão.
+        if self.ip_address and not self.origem.identificada:
+            self.origem = replace(self.origem, ip_address=self.ip_address)
 
     @property
     def path(self) -> PolicyPath:

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
+import { baixarJson } from '@/shared/lib/baixar'
 import { useAuth } from '@/features/auth/AuthContext'
 
 type Custodia = {
@@ -38,6 +39,14 @@ export function CredenciaisPage() {
   const [erro, setErro] = useState<string | null>(null)
   const [retirando, setRetirando] = useState<string | null>(null)
   const [verHistorico, setVerHistorico] = useState<string | null>(null)
+
+  const exportar = useMutation({
+    mutationFn: (credencial: Credencial) =>
+      request<Record<string, unknown>>(`/credenciais/${credencial.id}/exportar`).then(
+        (dados) => ({ dados, nome: credencial.name }),
+      ),
+    onSuccess: ({ dados, nome }) => baixarJson(dados, `credencial-${nome}.json`),
+  })
 
   const invalidar = () => {
     void queryClient.invalidateQueries({ queryKey: ['credenciais'] })
@@ -212,6 +221,15 @@ export function CredenciaisPage() {
                               Histórico
                             </Botao>
                           )}
+                          <Botao
+                            variante="ghost"
+                            pequeno
+                            disabled={exportar.isPending}
+                            onClick={() => exportar.mutate(c)}
+                            title="Governo da credencial em JSON. A senha não vai junto."
+                          >
+                            Exportar JSON
+                          </Botao>
                         </div>
                       </td>
                     </tr>

@@ -165,6 +165,11 @@ class LinhaConsumo(BaseModel):
     caminho: str
     leituras: int
     ultima: datetime
+    # Que tipo de segredo é este caminho: senha, chave de API, certificado.
+    # Sem isto a tela mostra uma lista de strings que ninguém consegue
+    # julgar; com isto, dá para ver que um robô lê três senhas e uma chave.
+    tipo: str = "desconhecido"
+    cofre: str = ""
 
 
 class ConsumoResponse(BaseModel):
@@ -181,6 +186,9 @@ class ConsumoResponse(BaseModel):
     negados: list[LinhaConsumo]
     caminhos_no_escopo: list[str]
     nunca_lidos: list[str]
+    # Quantos caminhos de cada tipo o robô consome. É o resumo que responde
+    # "que tipo de credencial esta aplicação usa?" sem ler a lista inteira.
+    por_tipo: dict[str, int] = {}
 
 
 class RenovarRequest(BaseModel):
@@ -548,6 +556,7 @@ def consumo_da_aplicacao(
     current: Annotated[CurrentUser, Depends(get_current_user)],
     apps: Annotated[ApplicationRepository, Depends(get_applications)],
     leases: Annotated[LeaseRepository, Depends(get_leases)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
     policies: Annotated[PolicyRepository, Depends(get_policies)],
     audit: Annotated[AuditRepository, Depends(get_audit)],
     db: Annotated[Session, Depends(get_db)],
@@ -574,6 +583,15 @@ def consumo_da_aplicacao(
 
     lidos = audit.consumo_por_ator(rotulo, desde=desde)
     negados = audit.negados_por_ator(rotulo, desde=desde)
+
+    # Resolve caminho -> tipo numa consulta só. Caminho que não casa com
+    # segredo existente fica "desconhecido" em vez de sumir: pode ser um
+    # segredo apagado depois da leitura, e esconder isso apagaria justamente
+    # o rastro que a revisão procura.
+    tipos = secrets.tipos_por_caminho()
+
+    def _classificar(caminho: str) -> tuple[str, str]:
+        return tipos.get(caminho, ("desconhecido", ""))
 
     # O escopo é o do último lease emitido: é o que vale hoje para o robô.
     historico = leases.list_for_application(app.id)
@@ -604,14 +622,37 @@ def consumo_da_aplicacao(
         aplicacao=str(app.name),
         dias=dias,
         lidos=[
-            LinhaConsumo(caminho=c, leituras=q, ultima=u) for c, q, u in lidos
+            LinhaConsumo(
+                caminho=c, leituras=q, ultima=u,
+                tipo=_classificar(c)[0], cofre=_classificar(c)[1],
+            )
+            for c, q, u in lidos
         ],
         negados=[
-            LinhaConsumo(caminho=c, leituras=q, ultima=u) for c, q, u in negados
+            LinhaConsumo(
+                caminho=c, leituras=q, ultima=u,
+                tipo=_classificar(c)[0], cofre=_classificar(c)[1],
+            )
+            for c, q, u in negados
         ],
+        por_tipo=_contar_por_tipo([c for c, _, _ in lidos], _classificar),
         caminhos_no_escopo=escopo,
         nunca_lidos=nunca,
     )
+
+
+def _contar_por_tipo(caminhos, classificar) -> dict[str, int]:  # noqa: ANN001
+    """Quantos caminhos distintos de cada tipo.
+
+    Conta caminhos, não leituras: um robô que lê a mesma senha mil vezes usa
+    uma senha, e somar as leituras faria essa senha parecer o grosso do
+    escopo quando o que a revisão quer saber é *quantas coisas* ele alcança.
+    """
+    contagem: dict[str, int] = {}
+    for caminho in caminhos:
+        tipo = classificar(caminho)[0]
+        contagem[tipo] = contagem.get(tipo, 0) + 1
+    return contagem
 
 
 # ------------------------------------------------- o que o robô de fato usa

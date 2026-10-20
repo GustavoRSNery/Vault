@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
+import { baixarJson } from '@/shared/lib/baixar'
 
 type Certificado = {
   id: string
@@ -140,22 +141,18 @@ export function CertificadosPage() {
                   <th>Responsável</th>
                   <th>Vence em</th>
                   <th>Situação</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
                 {lista.map((c) => (
-                  <tr key={c.id}>
-                    <td className="strong">
-                      {c.display_name}
-                      <div className="help">{c.subject}</div>
-                    </td>
-                    <td className="muted">{c.issuer}</td>
-                    <td className="muted">{c.owner_label || '—'}</td>
-                    <td className="muted">{formatarDataHora(c.not_after)}</td>
-                    <td>
-                      <EstadoCertificado certificado={c} />
-                    </td>
-                  </tr>
+                  <LinhaCertificado
+                    key={c.id}
+                    certificado={c}
+                    aoMudar={() =>
+                      void queryClient.invalidateQueries({ queryKey: ['certificados'] })
+                    }
+                  />
                 ))}
               </tbody>
             </table>
@@ -163,6 +160,149 @@ export function CertificadosPage() {
         )}
       </Card>
     </>
+  )
+}
+
+function LinhaCertificado({
+  certificado,
+  aoMudar,
+}: {
+  certificado: Certificado
+  aoMudar: () => void
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [confirmando, setConfirmando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  const exportar = useMutation({
+    mutationFn: () =>
+      request<Record<string, unknown>>(`/certificados/${certificado.name}/exportar`),
+    onSuccess: (dados) => baixarJson(dados, `certificado-${certificado.name}.json`),
+    onError: (e) =>
+      setErro(e instanceof ApiError ? e.message : 'Não foi possível exportar.'),
+  })
+
+  const excluir = useMutation({
+    mutationFn: () =>
+      request<void>(`/certificados/${certificado.name}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      setConfirmando(false)
+      aoMudar()
+    },
+    onError: (e) =>
+      setErro(e instanceof ApiError ? e.message : 'Não foi possível excluir.'),
+  })
+
+  return (
+    <>
+      <tr>
+        <td className="strong">
+          {certificado.display_name}
+          <div className="help">{certificado.subject}</div>
+        </td>
+        <td className="muted">{certificado.issuer}</td>
+        <td className="muted">{certificado.owner_label || '—'}</td>
+        <td className="muted">{formatarDataHora(certificado.not_after)}</td>
+        <td>
+          <EstadoCertificado certificado={certificado} />
+        </td>
+        <td>
+          <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+            <Botao pequeno variante="secondary" onClick={() => setAberto(!aberto)}>
+              {aberto ? 'Fechar' : 'Ver'}
+            </Botao>
+            <Botao
+              pequeno
+              variante="secondary"
+              disabled={exportar.isPending}
+              onClick={() => exportar.mutate()}
+            >
+              {exportar.isPending ? 'Gerando…' : 'Exportar JSON'}
+            </Botao>
+            <Botao pequeno variante="secondary" onClick={() => setConfirmando(true)}>
+              Excluir
+            </Botao>
+          </div>
+        </td>
+      </tr>
+
+      {(aberto || confirmando || erro) && (
+        <tr>
+          <td colSpan={6}>
+            <div className="col" style={{ gap: 10, padding: '4px 0 10px' }}>
+              {erro && <Alerta tom="danger">{erro}</Alerta>}
+
+              {aberto && (
+                <div className="col" style={{ gap: 4 }}>
+                  <Detalhe rotulo="Titular" valor={certificado.subject} />
+                  <Detalhe rotulo="Emissor" valor={certificado.issuer} />
+                  <Detalhe rotulo="Série" valor={certificado.serial || '—'} />
+                  <Detalhe
+                    rotulo="Válido de"
+                    valor={formatarDataHora(certificado.not_before)}
+                  />
+                  <Detalhe
+                    rotulo="Válido até"
+                    valor={formatarDataHora(certificado.not_after)}
+                  />
+                  <Detalhe
+                    rotulo="Responsável"
+                    valor={certificado.owner_label || 'sem responsável definido'}
+                  />
+                  {certificado.description && (
+                    <Detalhe rotulo="Observação" valor={certificado.description} />
+                  )}
+                  <span className="help">
+                    A chave privada, quando guardada, vive cifrada no cofre e não
+                    aparece aqui nem na exportação.
+                  </span>
+                </div>
+              )}
+
+              {confirmando && (
+                <>
+                  <Alerta tom="warning">
+                    Excluir remove <strong>{certificado.display_name}</strong> do
+                    acompanhamento de vencimento. Se o certificado ainda estiver
+                    em uso, ninguém será avisado quando ele vencer — e certificado
+                    vencido derruba conexão TLS.
+                  </Alerta>
+                  <div className="row" style={{ gap: 10 }}>
+                    <Botao
+                      variante="danger"
+                      disabled={excluir.isPending}
+                      onClick={() => excluir.mutate()}
+                    >
+                      {excluir.isPending ? 'Excluindo…' : 'Excluir certificado'}
+                    </Botao>
+                    <Botao
+                      variante="secondary"
+                      onClick={() => {
+                        setConfirmando(false)
+                        setErro(null)
+                      }}
+                    >
+                      Cancelar
+                    </Botao>
+                  </div>
+                </>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function Detalhe({ rotulo, valor }: { rotulo: string; valor: string }) {
+  return (
+    <div className="row" style={{ gap: 8 }}>
+      <span className="help" style={{ minWidth: 110 }}>
+        {rotulo}
+      </span>
+      <span>{valor}</span>
+    </div>
   )
 }
 

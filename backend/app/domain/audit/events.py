@@ -87,6 +87,24 @@ class AuditAction(StrEnum):
     PASSWORD_RESET_FAILED = "senha_redefinicao_falhou"
     PASSWORD_RESET_REQUESTED = "senha_redefinicao_pedida"
     PASSWORD_RESET_APPROVED = "senha_redefinicao_aprovada"
+    API_KEY_CREATED = "chave_api_cadastrada"
+    API_KEY_UPDATED = "chave_api_alterada"
+    API_KEY_REVOKED = "chave_api_revogada"
+    API_KEY_DELETED = "chave_api_excluida"
+
+    # Integrações (webhooks). O segredo de assinatura nunca entra no motivo
+    # de um evento: a trilha é lida por mais gente do que quem administra
+    # integrações.
+    INTEGRATION_CREATED = "integracao_cadastrada"
+    INTEGRATION_UPDATED = "integracao_alterada"
+    INTEGRATION_DELETED = "integracao_excluida"
+    INTEGRATION_SECRET_ROTATED = "integracao_segredo_rotacionado"
+    INTEGRATION_TESTED = "integracao_testada"
+    DEVICE_ACCESS_UPDATED = "dispositivo_acessos_alterados"
+    REMOTE_ACCESS_STARTED = "acesso_remoto_iniciado"
+    CERTIFICATE_EXPORTED = "certificado_exportado"
+    CERTIFICATE_DELETED = "certificado_excluido"
+    CREDENTIAL_EXPORTED = "credencial_exportada"
 
 
 class AuditOutcome(StrEnum):

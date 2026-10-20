@@ -178,25 +178,40 @@ def _conceder_inventario_ao_admin(session: Session) -> None:
     deveria, por si, entregar o governo do inventário.
     """
     nome = "inventario-total"
+    caminhos = (
+        "dispositivos",
+        "dispositivos/*",
+        "credenciais",
+        "credenciais/*",
+        "certificados",
+        "certificados/*",
+        "chaves-api",
+        "chaves-api/*",
+        "integracoes",
+        "integracoes/*",
+    )
+
     politica = session.scalar(select(PolicyModel).where(PolicyModel.name == nome))
     if politica is None:
         politica = PolicyModel(
             name=nome,
-            description="Gestão de dispositivos, credenciais e certificados.",
+            description="Gestão de dispositivos, credenciais, certificados, chaves de API e integrações.",
         )
-        politica.rules = [
-            PolicyRuleModel(path=caminho, capabilities=TODAS, effect="allow")
-            for caminho in (
-                "dispositivos",
-                "dispositivos/*",
-                "credenciais",
-                "credenciais/*",
-                "certificados",
-                "certificados/*",
-            )
-        ]
         session.add(politica)
         session.flush()
+
+    # Acrescenta os caminhos que faltam em vez de só criar a política quando
+    # ela não existe. Entidade nova (foi o caso de `chaves-api`) não nasce no
+    # banco de quem já rodou o seed antes: a política fica parada na versão
+    # antiga e a tela devolve 403 sem que nada esteja quebrado — o RBAC está
+    # certo, o seed é que ficou para trás.
+    ja_cobertos = {regra.path for regra in politica.rules}
+    for caminho in caminhos:
+        if caminho not in ja_cobertos:
+            politica.rules.append(
+                PolicyRuleModel(path=caminho, capabilities=TODAS, effect="allow")
+            )
+    session.flush()
 
     papel = session.scalar(select(RoleModel).where(RoleModel.name == "administrador"))
     if papel is not None and politica not in papel.policies:

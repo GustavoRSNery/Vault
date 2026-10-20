@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..application.access.login import Login
 from ..config import Settings, get_settings
 from ..domain.shared.errors import AuthenticationError
+from ..application.ports.webhooks import EntregadorDeWebhook
 from ..application.ports.sessions import (
     ArmazenamentoDeGravacao,
     CapturaDeSessao,
@@ -36,7 +37,10 @@ from ..infrastructure.crypto.envelope import EnvelopeCryptoService, LocalKeyProv
 from ..infrastructure.crypto.kms import KmsKeyProvider
 from ..infrastructure.crypto.passwords import Argon2PasswordHasher
 from ..infrastructure.db.models import UserModel
+from ..infrastructure.integrations.entregadores import EntregadorDeEnsaio
 from ..infrastructure.db.repositories import (
+    DestinoWebhookRepository,
+    EntregaWebhookRepository,
     AuditRepository,
     PolicyRepository,
     SecretRepository,
@@ -236,3 +240,27 @@ def get_siem_exporter(
     porta `SiemExporter`, nao o arquivo.
     """
     return JsonlExporter(settings.audit_export_path)
+
+
+def get_destinos_webhook(
+    db: Annotated[Session, Depends(get_db)],
+) -> DestinoWebhookRepository:
+    return DestinoWebhookRepository(db)
+
+
+def get_entregas_webhook(
+    db: Annotated[Session, Depends(get_db)],
+) -> EntregaWebhookRepository:
+    return EntregaWebhookRepository(db)
+
+
+def get_entregador_webhook() -> EntregadorDeWebhook:
+    """Como os webhooks saem daqui.
+
+    O ensaio e o padrao de proposito: um sistema recem-instalado que
+    comecasse a disparar requisicoes para fora, com eventos de cofre, seria
+    uma surpresa desagradavel. Para entregar de verdade, troque por
+    `EntregadorHttp()` — o resto do sistema nao muda, porque so conhece a
+    porta `EntregadorDeWebhook`.
+    """
+    return EntregadorDeEnsaio()

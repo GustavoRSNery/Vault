@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
+import { PainelAcessoRemoto, type Acesso } from './AcessoRemoto'
 
 type Dispositivo = {
   id: string
@@ -12,6 +13,7 @@ type Dispositivo = {
   address: string
   tags: string[]
   description: string
+  acessos: Acesso[]
   is_active: boolean
   credenciais: number
   created_at: string
@@ -116,12 +118,31 @@ export function DispositivosPage() {
                     <th>Endereço</th>
                     <th>Etiquetas</th>
                     <th>Credenciais</th>
+                    <th>Acesso</th>
                     <th>Desde</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visiveis.map((d) => (
-                    <tr key={d.id}>
+                    <LinhaDispositivo key={d.id} dispositivo={d} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Card>
+    </>
+  )
+}
+
+function LinhaDispositivo({ dispositivo: d }: { dispositivo: Dispositivo }) {
+  const [verAcessos, setVerAcessos] = useState(false)
+  const acessos = d.acessos ?? []
+
+  return (
+    <>
+                    <tr>
                       <td className="strong">
                         {d.display_name}
                         {d.description && <div className="help">{d.description}</div>}
@@ -147,15 +168,29 @@ export function DispositivosPage() {
                         </div>
                       </td>
                       <td className="secret-sm">{d.credenciais}</td>
+                      <td>
+                        <Botao
+                          pequeno
+                          variante={acessos.length > 0 ? 'secondary' : 'ghost'}
+                          onClick={() => setVerAcessos(!verAcessos)}
+                        >
+                          {verAcessos
+                            ? 'Fechar'
+                            : acessos.length === 0
+                              ? 'Cadastrar'
+                              : `Acessar (${acessos.length})`}
+                        </Botao>
+                      </td>
                       <td className="muted">{formatarDataHora(d.created_at)}</td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </Card>
+
+      {verAcessos && (
+        <tr>
+          <td colSpan={7}>
+            <PainelAcessoRemoto dispositivo={d.name} acessos={acessos} />
+          </td>
+        </tr>
+      )}
     </>
   )
 }
