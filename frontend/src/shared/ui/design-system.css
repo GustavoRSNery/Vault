@@ -1,28 +1,58 @@
 /* Vault de Senhas — kit de UI (tokens do design system) */
+/* Paleta em OKLCH, medida na tela que serve de referencia (o Orquestrador).
+   OKLCH e nao hex de proposito: a luminosidade (primeiro numero) e perceptual,
+   entao duas cores com o mesmo L pesam igual aos olhos, por mais distantes que
+   sejam os matizes. E o que permite trocar azul por vermelho numa faixa de
+   grafico sem que uma pareca "mais forte" que a outra.
+
+   Tres niveis por familia, sempre com o mesmo L: o fundo (L .94-.96, croma
+   baixo), o preenchimento (L .86-.92) e o texto (L .42-.55, croma alto o
+   bastante para contraste AA sobre o fundo claro da propria familia). */
 :root{
-  --surface-000:#edf3f8; --surface-100:#ffffff; --surface-200:#f5f9fc;
-  --border:#e3eaf1; --border-strong:#7c8ea0;
-  --ink:#2e3a4e; --ink-muted:#5d6b7e;
-  --brand:#0b7db3; --on-brand:#ffffff; --brand-accent:#1899d2;
-  --brand-text:#085e87; --brand-soft:#d6eef9; --brand-faint:#ebf6fc;
-  --success-text:#0f766e; --success-soft:#dbf2ee;
-  --danger-text:#c02429; --danger-soft:#fce8e9;
-  --warning-text:#8a5b0c; --warning-soft:#fbf1dc;
-  --tint-lilac:#eeeafb;
-  --shadow-card:0 1px 2px rgba(23,43,66,.06),0 8px 24px rgba(23,43,66,.08);
-  --shadow-pop:0 4px 12px rgba(23,43,66,.10),0 16px 40px rgba(23,43,66,.14);
-  --sans:"Plus Jakarta Sans","Segoe UI",system-ui,sans-serif;
+  /* Neutros com um fio de verde (matiz 160-165), nunca cinza puro: cinza
+     neutro ao lado de cores quentes parece sujo. */
+  --surface-000:oklch(.96 .006 160); --surface-100:#ffffff; --surface-200:oklch(.975 .004 160);
+  --border:oklch(.92 .006 160); --border-strong:oklch(.78 .012 165);
+  --ink:oklch(.28 .02 165); --ink-muted:oklch(.55 .015 165);
+
+  /* Roxo e a cor de acao da referencia. */
+  --brand:oklch(.6 .14 295); --on-brand:#ffffff; --brand-accent:oklch(.6 .14 295);
+  --brand-text:oklch(.42 .12 295); --brand-soft:oklch(.9 .04 295); --brand-faint:oklch(.96 .018 295);
+
+  --success-text:oklch(.42 .11 162); --success-soft:oklch(.9 .05 160);
+  --danger-text:oklch(.5 .16 28);    --danger-soft:oklch(.9 .07 28);
+  --warning-text:oklch(.5 .13 60);   --warning-soft:oklch(.92 .08 75);
+  --info-text:oklch(.46 .11 265);    --info-soft:oklch(.9 .05 255);
+  --tint-lilac:oklch(.93 .05 295);
+
+  /* Preenchimentos de grafico: L .86-.92, o bastante para o numero escrito
+     por cima continuar legivel em preto. */
+  --chart-1:oklch(.6 .14 240);  --chart-1-soft:oklch(.9 .05 255);
+  --chart-2:oklch(.5 .16 28);   --chart-2-soft:oklch(.9 .07 28);
+  --chart-3:oklch(.62 .13 75);  --chart-3-soft:oklch(.92 .08 75);
+  --chart-4:oklch(.6 .14 295);  --chart-4-soft:oklch(.9 .04 295);
+
+  /* A sombra da referencia tem tres camadas: difusa para profundidade,
+     curta para assentar o cartao, e um realce branco interno no topo que
+     imita luz vinda de cima. E o realce que da o aspecto de superficie. */
+  --shadow-card:0 10px 30px rgba(16,60,48,.10),0 1px 2px rgba(16,60,48,.06),inset 0 1px 0 rgba(255,255,255,.9);
+  --shadow-pop:0 18px 44px rgba(16,60,48,.16),0 2px 6px rgba(16,60,48,.08),inset 0 1px 0 rgba(255,255,255,.9);
+  --radius-card:18px;
+  --sans:"Inter","Plus Jakarta Sans","Segoe UI",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,"Cascadia Mono",monospace;
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:var(--sans);color:var(--ink);font-size:14px;line-height:1.5;
-  background:radial-gradient(1100px 620px at 0% 0%,var(--brand-faint) 0%,rgba(235,246,252,0) 55%),
-             radial-gradient(900px 560px at 100% 100%,var(--tint-lilac) 0%,rgba(238,234,251,0) 55%),
+  /* Fundo neutro e claro, com dois halos frios bem diluidos. Na referencia o
+     fundo e quase branco e quem carrega a cor sao os cartoes e os graficos —
+     fundo chapado colorido competiria com eles. */
+  background:radial-gradient(1200px 680px at 0% 0%,oklch(.97 .02 295) 0%,transparent 58%),
+             radial-gradient(900px 560px at 100% 100%,oklch(.97 .015 240) 0%,transparent 55%),
              var(--surface-000);}
 .app{display:flex;flex-wrap:wrap;min-height:100vh;padding:16px;gap:16px}
 .main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:20px;padding:8px 16px 32px}
 /* sidebar */
-.sidebar{width:232px;background:var(--surface-100);border-radius:16px;box-shadow:var(--shadow-card);padding:20px 12px 16px;display:flex;flex-direction:column;gap:2px}
+.sidebar{width:232px;background:var(--surface-100);border:1px solid rgba(255,255,255,.85);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:20px 12px 16px;display:flex;flex-direction:column;gap:2px}
 .logo{display:flex;align-items:center;gap:10px;padding:2px 10px 16px}
 .logo .mark{width:34px;height:34px;border-radius:10px;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;color:var(--brand-text)}
 .logo b{display:block;font-size:14px;line-height:1.1}
@@ -75,9 +105,16 @@ h2.title{margin:0;font-size:16px;line-height:24px;font-weight:600}
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
 .cards-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
 .cards-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-.card{background:var(--surface-100);border-radius:16px;box-shadow:var(--shadow-card);padding:24px;position:relative}
-.metric .cap{font-size:13px;font-weight:500;color:var(--ink-muted)}
-.metric .val{font-size:32px;line-height:40px;font-weight:700;margin:6px 0 2px}
+/* O cartao da referencia nao e branco chapado: tem borda branca translucida
+   e o realce interno da sombra, o que o faz parecer uma superficie levantada
+   em vez de um retangulo colado. */
+.card{background:var(--surface-100);border:1px solid rgba(255,255,255,.85);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:24px 28px;position:relative}
+/* Rotulo em versalete, como na referencia: diferencia a legenda do numero
+   sem precisar de outra cor. */
+.metric .cap{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:var(--ink-muted)}
+.metric .val{font-size:34px;line-height:42px;font-weight:700;margin:8px 0 4px;letter-spacing:-.8px}
+.metric .progress{margin:4px 0 6px}
+.ponto{width:8px;height:8px;border-radius:999px;flex:none}
 .metric .link{font-size:12px;color:var(--brand-text);text-decoration:none}
 .icon-circle{position:absolute;top:20px;right:20px;width:40px;height:40px;border-radius:999px;display:flex;align-items:center;justify-content:center}
 .ic-brand{background:var(--brand-soft);color:var(--brand-text)}
@@ -147,8 +184,13 @@ h2.title{margin:0;font-size:16px;line-height:24px;font-weight:600}
 .drawer{position:absolute;top:0;right:0;bottom:0;width:440px;background:var(--surface-100);box-shadow:var(--shadow-pop);border-radius:16px 0 0 16px;padding:28px;display:flex;flex-direction:column;gap:16px}
 .code-input{display:flex;gap:10px}
 .code-input .digit{width:48px;height:56px;border:1px solid var(--border-strong);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:22px;font-weight:600;background:var(--surface-100)}
-.progress{height:8px;border-radius:999px;background:var(--surface-200);overflow:hidden}
-.progress span{display:block;height:100%;border-radius:999px;background:var(--brand-accent)}
+.progress{height:6px;border-radius:999px;background:oklch(.93 .006 160);overflow:hidden}
+.progress span{display:block;height:100%;border-radius:999px;background:var(--brand)}
+.progress .p-brand{background:var(--brand)}
+.progress .p-success{background:var(--success-text)}
+.progress .p-danger{background:var(--danger-text)}
+.progress .p-warning{background:var(--warning-text)}
+.progress .p-muted{background:var(--border-strong)}
 /* ---------------------------------------------------------------------------
    Gráficos com eixo.
    O `.bars` acima é a versão sem eixo, que serve para comparar duas ou três
@@ -165,9 +207,23 @@ h2.title{margin:0;font-size:16px;line-height:24px;font-weight:600}
 .gx .marca{fill:var(--ink-muted);font-family:var(--sans);font-size:10.5px}
 .gx .marca-y{text-anchor:end;dominant-baseline:middle}
 .gx .marca-x{text-anchor:middle}
-.gx .faixa-sucesso{fill:var(--brand-accent)}
-.gx .faixa-negado{fill:var(--danger-text)}
-.gx .faixa-falha{fill:var(--warning-text)}
+.gx .faixa-sucesso{fill:var(--chart-1)}
+.gx .faixa-negado{fill:var(--chart-2)}
+.gx .faixa-falha{fill:var(--chart-3)}
+/* Colunas compactas: o volume em tom claro, o que importa em tom cheio.
+   Duas intensidades da MESMA familia, nao duas cores: a leitura e "quanto
+   desse volume foi X", e matizes diferentes sugeririam grandezas distintas. */
+/* Tira de atividade: SVG so com as colunas, rotulos em HTML embaixo.
+   O SVG estica sem manter proporcao (e o que permite altura fixa em px),
+   e texto esticado denunciaria a deformacao — por isso os rotulos saem. */
+.tira{display:flex;flex-direction:column;gap:6px}
+.tira-svg{width:100%;display:block}
+.tira-rotulos{display:grid;font-size:10.5px;color:var(--ink-muted);font-family:var(--sans)}
+.tira-rotulos span{text-align:center;white-space:nowrap;overflow:visible}
+.gx .col-base{fill:var(--brand-soft)}
+.gx .col-destaque{fill:var(--brand)}
+.gx .col-alerta{fill:var(--danger-text)}
+.gx .col-alerta-base{fill:var(--danger-soft)}
 /* A coluna inteira, transparente, captura o hover: mirar numa faixa de 2px
    de altura seria impossível na prática. */
 .gx .alvo{fill:transparent;cursor:default}
@@ -179,9 +235,10 @@ h2.title{margin:0;font-size:16px;line-height:24px;font-weight:600}
 .g-legenda{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--ink-muted)}
 .g-legenda .item{display:inline-flex;align-items:center;gap:6px}
 .g-legenda .chave{width:10px;height:10px;border-radius:3px;flex:none}
-.k-sucesso{background:var(--brand-accent)}
-.k-negado{background:var(--danger-text)}
-.k-falha{background:var(--warning-text)}
+.k-volume{background:var(--brand-soft)}
+.k-sucesso{background:var(--chart-1)}
+.k-negado{background:var(--chart-2)}
+.k-falha{background:var(--chart-3)}
 /* Chip que filtra: o padrão mais útil do painel — todo elemento visual é
    também um controle. Difere de `.pill` por carregar uma contagem. */
 .chip{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface-100);color:var(--ink);cursor:pointer;font-family:var(--sans);line-height:1.2}

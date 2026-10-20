@@ -25,6 +25,7 @@
 export { BarraDeProporcao, type ParteDaProporcao } from './BarraDeProporcao'
 export { BarrasEmpilhadas, type Serie } from './BarrasEmpilhadas'
 export { BarrasHorizontais, type ItemDoRanking } from './BarrasHorizontais'
+export { ColunasCompactas, type ColunaDoDia } from './ColunasCompactas'
 export {
   AlvoDeLeitura,
   EixoHorizontal,

@@ -815,6 +815,72 @@ restritivo.
 
 ---
 
+## 2026-10-20 — Paleta e formatos da referência
+
+Três ajustes pedidos depois de ver o resultado no ar: o gráfico de atividade
+estava **enorme**, a tela de alertas **não tinha mudado quase nada**, e a
+inspiração precisava ser lida também para cor, fundo e formato — não só para
+estrutura.
+
+### O que medi, em vez de estimar
+
+Em vez de olhar o print e chutar valores, extraí os tokens do DOM da
+referência. Dois achados mudaram o resultado:
+
+1. **A paleta é OKLCH**, com luminosidade alta (.86–.96) e croma baixo
+   (.04–.10). São pastéis, não cores saturadas. Adotei OKLCH pelo mesmo
+   motivo que eles: a luminosidade é perceptual, então duas cores com o mesmo
+   L pesam igual aos olhos por mais distantes que sejam os matizes — é o que
+   permite trocar azul por vermelho numa faixa sem que uma pareça "mais
+   forte".
+2. **O cartão não é branco chapado.** Tem borda branca translúcida, raio de
+   16–22px e uma sombra de três camadas: difusa para profundidade, curta para
+   assentar, e um realce branco *interno* no topo. É esse realce que dá o
+   aspecto de superfície levantada.
+
+O fundo da página lá é quase branco: quem carrega a cor são os cartões e os
+gráficos. O meu tinha dois halos coloridos fortes demais, que competiam.
+
+### A tira de atividade
+
+O gráfico alto virou uma tira de 64px — o formato das colunas da aba
+"Análise". Colunas largas e encostadas, topo arredondado, base reta, cor
+clara para o volume e saturada para o que foi negado. Sem eixo Y e sem
+grade: a pergunta aqui é *em que dias houve movimento e quando foi atípico*,
+que é comparação de forma. `BarrasEmpilhadas` continua existindo para quando
+a pergunta for *quanto*.
+
+**Errei duas vezes na geometria antes de acertar**, e as duas tentativas
+ensinam coisas opostas sobre `preserveAspectRatio`:
+
+- Com `none` e altura só no estilo, o SVG esticou cada eixo de forma
+  independente: as colunas achataram até quase sumir e a fonte dos rótulos
+  saiu deformada.
+- Troquei para `meet`, que respeita a proporção — e aí a altura passou a ser
+  refém da largura: num container de 1300px, o viewBox forçava ~120px e a
+  tira deixava de ser tira.
+
+A resposta foi voltar a `none` **e tirar o texto de dentro do SVG**. As
+colunas são retângulos e esticam sem parecer erradas; texto, não. Os rótulos
+de data ficaram em HTML, numa grade de colunas iguais sob o gráfico.
+
+### Alertas
+
+A crítica estava certa: eu tinha trocado a estrutura e mantido a aparência.
+Agora:
+
+- Os cards ganharam **ponto colorido, rótulo em versalete, barra de proporção
+  e "% do total"** — um número solto não diz se é muito; "3" pode ser
+  catástrofe ou rotina, e "50% do total" se lê de relance.
+- O cartão "Como as pendências se distribuem" **saiu**. A barra de proporção
+  que havia nele repetia o que os três cards passaram a mostrar, e dois
+  desenhos do mesmo número competem em vez de somar.
+- Os chips subiram para **junto da lista que filtram**, sem cartão próprio —
+  como na aba "Erros" da referência. Um cartão só para os filtros os afastava
+  do efeito que produzem.
+
+---
+
 ## Em aberto
 
 - [ ] **Destino inviolável de verdade** para a exportação — o arquivo local

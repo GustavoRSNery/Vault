@@ -93,16 +93,42 @@ export function CardMetrica({
   valor,
   tom = 'brand',
   icone,
+  de,
 }: {
   rotulo: string
   valor: string | number
   tom?: Tom
   icone?: ReactNode
+  /**
+   * Total sobre o qual este valor é uma parte. Quando informado, o card
+   * ganha barra de proporção e "x% do total".
+   *
+   * Um número solto não diz se é muito: "419" sozinho pode ser catástrofe ou
+   * rotina. Contra o total, vira "60% do total" e se lê de relance.
+   */
+  de?: number
 }) {
+  const numero = typeof valor === 'number' ? valor : Number(valor)
+  const temProporcao = de !== undefined && de > 0 && Number.isFinite(numero)
+  const pct = temProporcao ? Math.round((numero / de) * 100) : 0
+
   return (
     <section className="card metric">
-      <div className="cap">{rotulo}</div>
+      {/* O ponto colorido é o que liga o card à faixa correspondente nos
+          gráficos — sem ele, a cor do número seria o único vínculo. */}
+      <div className="cap">
+        <span className={`ponto d-${tom}`} aria-hidden="true" />
+        {rotulo}
+      </div>
       <div className="val">{valor}</div>
+      {temProporcao && (
+        <>
+          <div className="progress" aria-hidden="true">
+            <span className={`p-${tom}`} style={{ width: `${pct}%` }} />
+          </div>
+          <div className="help">{pct}% do total</div>
+        </>
+      )}
       {icone && (
         <div className={`icon-circle ic-${tom}`} aria-hidden="true">
           {icone}

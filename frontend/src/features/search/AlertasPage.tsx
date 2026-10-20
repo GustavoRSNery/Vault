@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { request } from '@/shared/api/client'
 import { Badge, Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
-import { BarraDeProporcao } from '@/shared/charts'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 type Severidade = 'alta' | 'media' | 'baixa'
@@ -81,57 +80,41 @@ export function AlertasPage() {
       </header>
 
       <div className="cards-3">
-        <CardMetrica rotulo="Alta" valor={altas} tom="danger" />
-        <CardMetrica rotulo="Média" valor={medias} tom="warning" />
-        <CardMetrica rotulo="Informação" valor={baixas} tom="muted" />
+        <CardMetrica rotulo="Alta" valor={altas} tom="danger" de={itens.length} />
+        <CardMetrica rotulo="Média" valor={medias} tom="warning" de={itens.length} />
+        <CardMetrica
+          rotulo="Informação"
+          valor={baixas}
+          tom="muted"
+          de={itens.length}
+        />
       </div>
 
+      {/* Os chips ficam COLADOS na lista que filtram, sem cartão próprio.
+          Um cartão só para os filtros os afastaria do efeito que produzem, e
+          a barra de proporção que havia aqui repetia o que os três cards
+          acima já mostram — dois desenhos do mesmo número competem em vez de
+          somar. */}
       {itens.length > 0 && (
-        <Card titulo="Como as pendências se distribuem">
-          <div className="col" style={{ gap: 12 }}>
-            <BarraDeProporcao
-              partes={[
-                { nome: 'Alta', valor: altas, classe: 'k-negado' },
-                { nome: 'Média', valor: medias, classe: 'k-falha' },
-                { nome: 'Informação', valor: baixas, classe: 'k-sucesso' },
-              ]}
-            />
-            <div className="row between wrap" style={{ gap: 12 }}>
-              <div className="g-legenda">
-                <span className="item">
-                  <span className="chave k-negado" /> Alta · {altas}
-                </span>
-                <span className="item">
-                  <span className="chave k-falha" /> Média · {medias}
-                </span>
-                <span className="item">
-                  <span className="chave k-sucesso" /> Informação · {baixas}
-                </span>
-              </div>
-              <span className="help">{itens.length} pendência(s) no total</span>
-            </div>
-
-            <div className="pill-group" style={{ paddingTop: 4 }}>
-              <button
-                type="button"
-                className={`chip${filtroAtivo ? '' : ' active'}`}
-                onClick={() => setCategoria(null)}
-              >
-                Todas <span className="qtd">{itens.length}</span>
-              </button>
-              {categorias.map(([nome, quantas]) => (
-                <button
-                  key={nome}
-                  type="button"
-                  className={`chip${categoria === nome ? ' active' : ''}`}
-                  onClick={() => setCategoria(categoria === nome ? null : nome)}
-                >
-                  {nome} <span className="qtd">{quantas}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </Card>
+        <div className="pill-group">
+          <button
+            type="button"
+            className={`chip${filtroAtivo ? '' : ' active'}`}
+            onClick={() => setCategoria(null)}
+          >
+            Todas <span className="qtd">{itens.length}</span>
+          </button>
+          {categorias.map(([nome, quantas]) => (
+            <button
+              key={nome}
+              type="button"
+              className={`chip${categoria === nome ? ' active' : ''}`}
+              onClick={() => setCategoria(categoria === nome ? null : nome)}
+            >
+              {nome} <span className="qtd">{quantas}</span>
+            </button>
+          ))}
+        </div>
       )}
 
       <Card>

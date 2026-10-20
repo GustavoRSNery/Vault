@@ -5,12 +5,7 @@ import { useAuth } from '@/features/auth/AuthContext'
 import { useCofres } from '@/features/vaults/CofresPage'
 import { request } from '@/shared/api/client'
 import { Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
-import {
-  BarrasEmpilhadas,
-  BarrasHorizontais,
-  Legenda,
-  type Serie,
-} from '@/shared/charts'
+import { BarrasHorizontais, ColunasCompactas } from '@/shared/charts'
 
 type PontoDaSerie = {
   dia: string
@@ -18,28 +13,6 @@ type PontoDaSerie = {
   negado: number
   falha_login: number
 }
-
-/**
- * As três faixas do gráfico de atividade.
- *
- * Separadas de propósito: somadas num total só esconderiam a crista
- * vermelha, que num cofre de senhas é o sinal mais importante que existe.
- */
-const FAIXAS: Serie<PontoDaSerie>[] = [
-  {
-    chave: 'sucesso',
-    rotulo: 'Concluído',
-    classe: 'faixa-sucesso',
-    valor: (p) => p.sucesso,
-  },
-  { chave: 'negado', rotulo: 'Negado', classe: 'faixa-negado', valor: (p) => p.negado },
-  {
-    chave: 'falha',
-    rotulo: 'Falha de login',
-    classe: 'faixa-falha',
-    valor: (p) => p.falha_login,
-  },
-]
 
 /** `2026-10-20` vira `20/10`: o ano é o mesmo em toda a janela. */
 function diaCurto(iso: string): string {
@@ -93,8 +66,18 @@ export function DashboardPage() {
         <>
           <div className="cards-3">
             <CardMetrica rotulo="Cofres com acesso" valor={cofres?.length ?? 0} tom="brand" />
-            <CardMetrica rotulo="Cofres ativos" valor={ativos} tom="success" />
-            <CardMetrica rotulo="Cofres selados" valor={selados} tom="danger" />
+            <CardMetrica
+              rotulo="Cofres ativos"
+              valor={ativos}
+              tom="success"
+              de={cofres?.length}
+            />
+            <CardMetrica
+              rotulo="Cofres selados"
+              valor={selados}
+              tom="danger"
+              de={cofres?.length}
+            />
           </div>
 
           <Card
@@ -124,13 +107,14 @@ export function DashboardPage() {
             ) : (
               <div className="col" style={{ gap: 14 }}>
                 <div className="row between wrap" style={{ gap: 12 }}>
-                  <Legenda
-                    itens={FAIXAS.map((f) => ({
-                      chave: f.chave,
-                      rotulo: f.rotulo,
-                      classe: `k-${f.chave}`,
-                    }))}
-                  />
+                  <div className="g-legenda">
+                    <span className="item">
+                      <span className="chave k-volume" /> Movimento do dia
+                    </span>
+                    <span className="item">
+                      <span className="chave k-negado" /> Negado ou falho
+                    </span>
+                  </div>
                   <span className="help">
                     {/* A janela pedida e o histórico real são coisas
                         diferentes: dizer "30 dias" num cofre instalado há 3
@@ -142,10 +126,20 @@ export function DashboardPage() {
                   </span>
                 </div>
 
-                <BarrasEmpilhadas
-                  pontos={metricas.serie}
-                  series={FAIXAS}
-                  rotuloDoPonto={(p) => diaCurto(p.dia)}
+                <ColunasCompactas
+                  colunas={metricas.serie.map((p) => {
+                    const total = p.sucesso + p.negado + p.falha_login
+                    const barrado = p.negado + p.falha_login
+                    return {
+                      rotulo: diaCurto(p.dia),
+                      total,
+                      destaque: barrado,
+                      descricao:
+                        `${diaCurto(p.dia)} · ${total} evento(s): ` +
+                        `${p.sucesso} concluído(s), ${p.negado} negado(s), ` +
+                        `${p.falha_login} falha(s) de login`,
+                    }
+                  })}
                   descricao={`Atividade por dia em ${metricas.dias} dias: ${metricas.total} eventos.`}
                 />
 
