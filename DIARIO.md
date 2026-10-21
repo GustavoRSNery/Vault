@@ -881,6 +881,91 @@ Agora:
 
 ---
 
+## 2026-10-21 — Abas por domínio no painel
+
+O painel passou a ter uma aba por página do grupo "Segredos" do menu, mais um
+resumo. A ordem das abas repete a do menu de propósito: quem decorou a
+navegação lateral encontra o mesmo arranjo aqui.
+
+### Um endpoint, não cinco
+
+`GET /panorama` devolve as contagens dos cinco domínios de uma vez. Abas
+trocam rápido, e uma chamada por aba faria cada clique esperar a rede. O
+corpo é pequeno — são contagens, nunca listas —, então trazer tudo sai mais
+barato que buscar sob demanda.
+
+**Nenhuma aba lista recursos um a um.** Isso é trabalho da página de destino,
+que tem filtro, busca e paginação; duplicar a lista criaria duas telas para
+manter e duas versões da mesma verdade. A aba mostra o estado e aponta o que
+precisa de ação; o botão "abrir" leva à lista.
+
+### O que cada aba responde
+
+- **Cofres** — segredos ativos contra o que está na lixeira. A lixeira não
+  entra no acervo ativo: somá-los inflaria o número com o que foi
+  deliberadamente descartado.
+- **Credenciais** — custódia aberta, custódia vencida e, principalmente,
+  *nunca rotacionadas*: essas podem ainda ser a senha de fábrica.
+- **Certificados** — vencidos e vencendo contam separado (somá-los esconderia
+  o que já quebrou dentro do que ainda dá para resolver), e a aba mostra o
+  **próximo a vencer com nome e prazo**, que é a pergunta que se faz antes de
+  renovar.
+- **Chaves de API** — o ciclo de vida, e as *ativas sem vencimento*: não é
+  erro, mas é dívida, porque sem prazo ninguém decide quando elas saem de
+  circulação.
+- **Dispositivos** — cobertura: quantos ainda não têm credencial no cofre, ou
+  seja, cujo acesso mora em planilha ou na memória de alguém.
+
+O **resumo** traz um número por domínio e um bloco "Precisa de atenção" que
+soma as pendências de todos, cada linha levando à página que a explica. Sem
+ele o resumo seria só contagem de acervo: saber que há 42 credenciais ajuda
+menos do que saber que 3 estão com a rotação atrasada.
+
+### Visibilidade
+
+Toda contagem respeita a política do usuário, pelo mesmo motivo da busca: um
+número que some recursos inalcançáveis denuncia a existência deles. Quem não
+tem acesso a nada vê **zero em tudo, não um erro** — o painel é a primeira
+tela depois do login, e falhar nela faria parecer que o sistema quebrou
+quando o que falta é permissão.
+
+### Menu
+
+Os títulos de grupo estavam menores que os itens (10px contra 13,5px), mas em
+cinza-apagado — então pesavam **menos** que os próprios itens e sumiam na
+varredura em vez de organizá-la. Agora são maiores, em negrito forte e na cor
+da marca: três sinais em vez de um.
+
+### Erro que o teste pegou
+
+Escrevi o endpoint chamando `secrets.list_for_vault()` e `list_deleted()`, que
+**não existem** — inventei os nomes. O real é
+`list_in_vault(vault_id, include_deleted=)`, e a lixeira sai da diferença
+entre as duas chamadas. Também usei `device_name` onde o campo é `device_id`.
+Confirmei cada nome no código antes de rodar, em vez de confiar na memória.
+
+Os primeiros testes falharam por culpa **do teste**, não do endpoint: concedi
+política em `certificados` quando os recursos moram em `certificados/<nome>`,
+e o padrão do projeto é o curinga `certificados/*`.
+
+### 🚨 Mutação achou o vazamento que eu dizia estar protegendo
+
+Primeira rodada: 4 mortos, **2 sobreviventes** — e o primeiro era grave.
+Remover o filtro de política da contagem de cofres **não quebrou nenhum
+teste**. Eu havia escrito no docstring que a visibilidade estava protegida, e
+tinha escrito um teste de vazamento só para certificados; o domínio onde os
+segredos de fato moram ficou sem cobertura.
+
+O segundo sobrevivente ensina sobre a forma do teste, não sobre o código:
+trocar `EXPIRED` por `EXPIRING` passava porque meu teste tinha **um
+certificado de cada estado**, e com 1-1-1 a soma fecha mesmo se os rótulos
+trocarem de lugar. Refiz com dois vencidos e um vencendo — quantidades
+diferentes só batem se cada estado for contado pelo que é.
+
+Segunda rodada: **6 de 6 mortos, zero sobreviventes.**
+
+---
+
 ## Em aberto
 
 - [ ] **Destino inviolável de verdade** para a exportação — o arquivo local

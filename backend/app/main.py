@@ -18,6 +18,7 @@ from .api.v1 import (
     metrics,
     mfa,
     onboarding,
+    panorama,
     search,
     sessions,
     settings as settings_router,
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(apikeys.router, prefix="/api/v1")
     app.include_router(integrations.router, prefix="/api/v1")
     app.include_router(metrics.router, prefix="/api/v1")
+    app.include_router(panorama.router, prefix="/api/v1")
 
     @app.get("/saude", tags=["Infraestrutura"], summary="Verificação de saúde")
     def saude() -> dict[str, str]:
