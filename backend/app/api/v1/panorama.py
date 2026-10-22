@@ -78,7 +78,17 @@ class PanoramaDeCredenciais(BaseModel):
     custodia_vencida: int
     rotacao_atrasada: int
     nunca_rotacionadas: int
+    por_rotacao: list[FaixaDeTempo] = []
     destaques: list[Destaque]
+
+
+class FaixaDeTempo(BaseModel):
+    """Quantos itens caem numa janela de tempo. O eixo X das abas."""
+
+    rotulo: str
+    quantas: int
+    # Marca a faixa que exige ação agora — a tela pinta diferente.
+    critica: bool = False
 
 
 class PanoramaDeCertificados(BaseModel):
@@ -88,6 +98,7 @@ class PanoramaDeCertificados(BaseModel):
     validos: int
     proximo_nome: str
     proximo_dias: int | None
+    por_vencimento: list[FaixaDeTempo] = []
     destaques: list[Destaque]
 
 
@@ -97,6 +108,7 @@ class PanoramaDeChaves(BaseModel):
     revogadas: int
     expiradas: int
     sem_vencimento: int
+    por_vencimento: list[FaixaDeTempo] = []
     destaques: list[Destaque]
 
 
@@ -114,6 +126,45 @@ class PanoramaResponse(BaseModel):
     certificados: PanoramaDeCertificados
     chaves: PanoramaDeChaves
     dispositivos: PanoramaDeDispositivos
+
+
+def _em_faixas(
+    dias: list[int], cortes: tuple[tuple[str, int, bool], ...]
+) -> list[FaixaDeTempo]:
+    """Distribui prazos em faixas acumulativas, da mais urgente à mais folgada.
+
+    Cada item cai na PRIMEIRA faixa cujo teto ele alcança, então as faixas se
+    excluem e somam o total — sem isso, "vence em 30 dias" e "vence em 90"
+    contariam o mesmo certificado duas vezes e o gráfico mostraria mais itens
+    do que existem.
+    """
+    faixas = [FaixaDeTempo(rotulo=r, quantas=0, critica=c) for r, _, c in cortes]
+    for valor in dias:
+        for i, (_, teto, _) in enumerate(cortes):
+            if valor <= teto:
+                faixas[i].quantas += 1
+                break
+    return faixas
+
+
+# Faixas de vencimento. Os cortes não são redondos por acaso: 7 dias é o que
+# sobra para uma renovação de emergência, 30 é o prazo de uma emissão manual
+# tranquila, e 90 é o horizonte de planejamento.
+CORTES_DE_VENCIMENTO: tuple[tuple[str, int, bool], ...] = (
+    ("Vencido", 0, True),
+    ("7 dias", 7, True),
+    ("30 dias", 30, False),
+    ("90 dias", 90, False),
+    ("Depois", 10**6, False),
+)
+
+# Faixas de rotação: quanto tempo desde a última troca.
+CORTES_DE_ROTACAO: tuple[tuple[str, int, bool], ...] = (
+    ("Até 30d", 30, False),
+    ("31–90d", 90, False),
+    ("91–180d", 180, True),
+    ("Mais de 180d", 10**6, True),
+)
 
 
 @router.get("", response_model=PanoramaResponse, summary="Panorama por domínio")
@@ -175,6 +226,17 @@ def panorama(
         custodia_vencida=len(vencidas),
         rotacao_atrasada=len(atrasadas),
         nunca_rotacionadas=len(nunca),
+        # Quem nunca rotacionou entra na última faixa: é o pior caso, não um
+        # caso sem dado — e omiti-lo esconderia justamente o que mais importa.
+        por_rotacao=_em_faixas(
+            [
+                (agora - c.last_rotated_at).days
+                if c.last_rotated_at is not None
+                else 10**6
+                for c in creds
+            ],
+            CORTES_DE_ROTACAO,
+        ),
         destaques=[
             Destaque(rotulo="Custódia vencida", quantas=len(vencidas), tom="danger"),
             Destaque(
@@ -204,6 +266,9 @@ def panorama(
         validos=len(certs) - len(vencidos) - len(vencendo),
         proximo_nome=proximo.display_name if proximo else "",
         proximo_dias=proximo.days_remaining(agora) if proximo else None,
+        por_vencimento=_em_faixas(
+            [max(c.days_remaining(agora), 0) for c in certs], CORTES_DE_VENCIMENTO
+        ),
         destaques=[
             Destaque(rotulo="Vencidos", quantas=len(vencidos), tom="danger"),
             Destaque(rotulo="Vencendo", quantas=len(vencendo), tom="warning"),
@@ -226,6 +291,16 @@ def panorama(
         revogadas=len(revogadas),
         expiradas=len(expiradas),
         sem_vencimento=len(perpetuas),
+        # Só as ativas: revogada ou expirada não tem vencimento futuro a
+        # planejar, e incluí-las empilharia o passado sobre o que vem.
+        por_vencimento=_em_faixas(
+            [
+                max((k.expira_em - agora).days, 0)
+                for k in ativas
+                if k.expira_em is not None
+            ],
+            CORTES_DE_VENCIMENTO,
+        ),
         destaques=[
             Destaque(rotulo="Expiradas", quantas=len(expiradas), tom="danger"),
             Destaque(

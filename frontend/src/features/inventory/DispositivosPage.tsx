@@ -4,6 +4,8 @@ import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
 import { PainelAcessoRemoto, type Acesso } from './AcessoRemoto'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 
 type Dispositivo = {
   id: string
@@ -36,6 +38,7 @@ const ROTULO_TIPO: Record<string, string> = Object.fromEntries(
 export function DispositivosPage() {
   const [criando, setCriando] = useState(false)
   const [filtro, setFiltro] = useState('')
+  const tour = useTour('dispositivos')
   const queryClient = useQueryClient()
 
   const { data: dispositivos, isLoading, error } = useQuery({
@@ -64,6 +67,8 @@ export function DispositivosPage() {
 
   return (
     <>
+      <Tour id="dispositivos" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
         <div className="row between wrap">
           <div>
@@ -74,9 +79,31 @@ export function DispositivosPage() {
               quem é cada credencial — sem isso, senha guardada é senha órfã.
             </p>
           </div>
-          <Botao pequeno onClick={() => setCriando(true)}>
-            Novo dispositivo
-          </Botao>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Dispositivos"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/dispositivos',
+                  descricao:
+                    'Os equipamentos do inventário: nome, tipo, endereço e quantas credenciais cada um guarda.',
+                  exemplo:
+                    '[{"name":"srv-db-01","kind":"servidor","address":"10.0.0.5"}]',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/sessoes/maquinas',
+                  descricao:
+                    'As máquinas alcançáveis por SSH, com o comando de conexão já montado pelo servidor. Sem senha — nunca.',
+                },
+              ]}
+            />
+            <Botao pequeno onClick={() => setCriando(true)}>
+              Novo dispositivo
+            </Botao>
+          </div>
         </div>
       </header>
 
@@ -170,6 +197,7 @@ function LinhaDispositivo({ dispositivo: d }: { dispositivo: Dispositivo }) {
                       <td className="secret-sm">{d.credenciais}</td>
                       <td>
                         <Botao
+                          data-tour="acessos"
                           pequeno
                           variante={acessos.length > 0 ? 'secondary' : 'ghost'}
                           onClick={() => setVerAcessos(!verAcessos)}

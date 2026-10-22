@@ -5,6 +5,7 @@ import { request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
 import { formatarDuracao, type Sessao } from './SessoesPage'
+import { Voltar } from '@/shared/ui/Voltar'
 
 type Evento = {
   deslocamento_ms: number
@@ -90,6 +91,7 @@ export function PlayerPage() {
   return (
     <>
       <header>
+        <Voltar para="/sessoes/gravacoes" rotulo="Todas as gravações" />
         <nav className="crumbs" style={{ marginBottom: 6 }}>
           <Link to="/sessoes/gravacoes">Gravações</Link>{' '}
           <span aria-hidden="true">›</span> {sessao.alvo}

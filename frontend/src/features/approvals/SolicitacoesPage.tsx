@@ -4,6 +4,12 @@ import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
 
+type ResultadoDoLote = {
+  aprovadas: number
+  recusadas: number
+  resultados: { id: string; aprovada: boolean; erro: string }[]
+}
+
 type Solicitacao = {
   id: string
   requester_label: string
@@ -54,6 +60,9 @@ export function SolicitacoesPage() {
     queryFn: () => request<Solicitacao[]>('/solicitacoes'),
   })
 
+  const [marcadas, setMarcadas] = useState<Set<string>>(new Set())
+  const [resumoDoLote, setResumoDoLote] = useState<string | null>(null)
+
   const { data: fila } = useQuery({
     queryKey: ['fila'],
     queryFn: () => request<Solicitacao[]>('/solicitacoes/fila'),
@@ -71,6 +80,34 @@ export function SolicitacoesPage() {
     },
     onError: (e) =>
       setErro(e instanceof ApiError ? e.message : 'Não foi possível concluir.'),
+  })
+
+  const aprovarLote = useMutation({
+    mutationFn: (ids: string[]) =>
+      request<ResultadoDoLote>('/solicitacoes/aprovar-em-lote', {
+        method: 'POST',
+        body: { ids, note: '' },
+      }),
+    onSuccess: (r) => {
+      setErro(null)
+      setMarcadas(new Set())
+      // O resumo aparece mesmo quando tudo deu certo: "aprovei 7" confirma
+      // que o clique fez o que prometia. Quando algo falha, dizer quantos e
+      // por quê é o mínimo — aprovar 20 e receber um "ok" genérico
+      // esconderia os 3 que ficaram para trás.
+      setResumoDoLote(
+        r.recusadas === 0
+          ? `${r.aprovadas} solicitação(ões) aprovada(s).`
+          : `${r.aprovadas} aprovada(s), ${r.recusadas} não: ` +
+            r.resultados
+              .filter((x) => !x.aprovada)
+              .map((x) => x.erro)
+              .join(' · '),
+      )
+      invalidar()
+    },
+    onError: (e) =>
+      setErro(e instanceof ApiError ? e.message : 'Não foi possível aprovar.'),
   })
 
   if (isLoading) return <Carregando texto="Carregando solicitações…" />
@@ -121,13 +158,65 @@ export function SolicitacoesPage() {
             Só o que cabe a você decidir. Pedidos seus não aparecem aqui: quem
             pede não aprova, nem tendo permissão.
           </p>
+          {/* Barra de seleção: fica acima da lista e some quando não há
+              nada marcado, para não ocupar espaço anunciando uma ação
+              indisponível. */}
+          <div className="row between wrap" style={{ gap: 12, marginBottom: 14 }}>
+            <label className="row" style={{ gap: 8, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={marcadas.size === fila.length && fila.length > 0}
+                // Marcado em parte: nem vazio nem cheio. Sem isto, a caixa
+                // mostraria "nada selecionado" com 3 de 7 marcados.
+                ref={(el) => {
+                  if (el) el.indeterminate = marcadas.size > 0 && marcadas.size < fila.length
+                }}
+                onChange={(e) =>
+                  setMarcadas(
+                    e.target.checked ? new Set(fila.map((s) => s.id)) : new Set(),
+                  )
+                }
+              />
+              <span className="help">
+                {marcadas.size > 0
+                  ? `${marcadas.size} de ${fila.length} selecionada(s)`
+                  : 'Selecionar todas'}
+              </span>
+            </label>
+
+            {marcadas.size > 0 && (
+              <Botao
+                pequeno
+                onClick={() => aprovarLote.mutate([...marcadas])}
+                disabled={aprovarLote.isPending}
+              >
+                {aprovarLote.isPending
+                  ? 'Aprovando…'
+                  : `Aprovar ${marcadas.size} selecionada(s)`}
+              </Botao>
+            )}
+          </div>
+
+          {resumoDoLote && (
+            <Alerta tom="warning">{resumoDoLote}</Alerta>
+          )}
+
           <div className="col" style={{ gap: 14 }}>
             {fila.map((s) => (
               <CartaoDecisao
                 key={s.id}
                 solicitacao={s}
-                ocupado={decidir.isPending}
+                ocupado={decidir.isPending || aprovarLote.isPending}
                 aoDecidir={(rota, note) => decidir.mutate({ id: s.id, rota, note })}
+                marcada={marcadas.has(s.id)}
+                aoMarcar={(marcar) =>
+                  setMarcadas((atual) => {
+                    const proximo = new Set(atual)
+                    if (marcar) proximo.add(s.id)
+                    else proximo.delete(s.id)
+                    return proximo
+                  })
+                }
               />
             ))}
           </div>
@@ -244,10 +333,14 @@ function CartaoDecisao({
   solicitacao,
   ocupado,
   aoDecidir,
+  marcada,
+  aoMarcar,
 }: {
   solicitacao: Solicitacao
   ocupado: boolean
   aoDecidir: (rota: string, note: string) => void
+  marcada: boolean
+  aoMarcar: (marcada: boolean) => void
 }) {
   const [nota, setNota] = useState('')
 
@@ -262,6 +355,14 @@ function CartaoDecisao({
       }}
     >
       <div className="row between wrap" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={marcada}
+            onChange={(e) => aoMarcar(e.target.checked)}
+            aria-label={`Selecionar pedido de ${solicitacao.requester_label}`}
+            style={{ marginTop: 4 }}
+          />
         <div>
           <b>{solicitacao.requester_label}</b>
           <div className="help">
@@ -269,6 +370,7 @@ function CartaoDecisao({
             em <code className="secret-sm">{solicitacao.path}</code> por{' '}
             {solicitacao.hours}h
           </div>
+        </div>
         </div>
         <span className="help">{formatarDataHora(solicitacao.created_at)}</span>
       </div>

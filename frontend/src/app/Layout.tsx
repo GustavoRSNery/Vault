@@ -94,7 +94,7 @@ const GRUPOS: Grupo[] = [
         fim: false,
         Icone: IconeSolicitacao,
       },
-      { para: '/sessoes', rotulo: 'Sessões', fim: true, Icone: IconeSessao },
+      { para: '/sessoes', rotulo: 'Sessões SSH', fim: true, Icone: IconeSessao },
       {
         para: '/sessoes/gravacoes',
         rotulo: 'Gravações',

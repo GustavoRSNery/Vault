@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from ...domain.access.policy import Capability, evaluate
 from ...domain.approvals.entities import AccessRequest, RequestStatus
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
-from ...domain.shared.errors import PermissionDeniedError
+from ...domain.shared.errors import DomainError, PermissionDeniedError
 from ...domain.shared.value_objects import PolicyPath
 from ...infrastructure.db.repositories import (
     AccessRequestRepository,
@@ -182,6 +182,90 @@ def fila_de_aprovacao(
         if evaluate(minhas, p.path, Capability.APPROVE)
         and p.requester_id != current.id
     ]
+
+
+class AprovarEmLoteRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=500)
+
+
+class ResultadoDoLote(BaseModel):
+    """O que aconteceu com cada pedido do lote.
+
+    Aprovar em lote é conveniência, não atalho: cada pedido passa pela mesma
+    checagem de permissão e pela mesma regra de domínio que a aprovação
+    individual. Um que falhe não derruba os outros, mas **aparece na
+    resposta** — aprovar 20 e receber "ok" quando 3 falharam seria pior que
+    não ter o botão.
+    """
+
+    id: str
+    aprovada: bool
+    erro: str = ""
+
+
+class LoteResponse(BaseModel):
+    aprovadas: int
+    recusadas: int
+    resultados: list[ResultadoDoLote]
+
+
+@router.post(
+    "/aprovar-em-lote", response_model=LoteResponse, summary="Aprovar várias"
+)
+def aprovar_em_lote(
+    payload: AprovarEmLoteRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    requests: Annotated[AccessRequestRepository, Depends(get_requests)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
+) -> LoteResponse:
+    """Aprova vários pedidos, um a um, relatando cada resultado.
+
+    Cada pedido gera o seu próprio evento de auditoria. Um evento único de
+    "lote aprovado" esconderia *o que* foi concedido — e é justamente isso
+    que uma auditoria vai querer revisar.
+
+    Ids repetidos são processados uma vez só: a tela pode mandar duplicata
+    sem que o pedido seja aprovado duas vezes.
+    """
+    resultados: list[ResultadoDoLote] = []
+    vistos: set[str] = set()
+
+    for request_id in payload.ids:
+        if request_id in vistos:
+            continue
+        vistos.add(request_id)
+        try:
+            pedido = requests.get(request_id)
+            _exigir_aprovador(current, policies, audit, db, pedido.path)
+            pedido.approve(current.id, current.email, payload.note)
+            requests.save(pedido)
+            audit.append(
+                _evento(
+                    current,
+                    AuditAction.ACCESS_APPROVED,
+                    str(pedido.path),
+                    reason=(
+                        f"Concedido a {pedido.requester_label} por "
+                        f"{pedido.hours}h. {payload.note}".strip()
+                    ),
+                )
+            )
+            resultados.append(ResultadoDoLote(id=request_id, aprovada=True))
+        except DomainError as erro:
+            # Segue para os próximos: um pedido já decidido, ou um que o
+            # aprovador não alcança, não deve impedir a aprovação dos outros.
+            resultados.append(
+                ResultadoDoLote(id=request_id, aprovada=False, erro=erro.message)
+            )
+
+    return LoteResponse(
+        aprovadas=sum(1 for r in resultados if r.aprovada),
+        recusadas=sum(1 for r in resultados if not r.aprovada),
+        resultados=resultados,
+    )
 
 
 @router.post(

@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
+import { RequisicaoExemplo } from './RequisicaoExemplo'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { Alerta, Badge, Botao, Campo, Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
 
@@ -28,14 +31,22 @@ type ChaveDeApi = {
   escopo: string
   usada_em: string[]
   responsavel: string
+  documentacao_url: string
+  url_base: string
+  metodo: string
+  rota_exemplo: string
   vault_name: string
   secret_name: string
   expira_em: string | null
   situacao: string
   dias_para_vencer: number | null
   como_usar: string
+  requisicao_exemplo: [string, string][]
+  curl_exemplo: string
   created_at: string
 }
+
+const METODOS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 const AMBIENTES = [
   { valor: 'producao', rotulo: 'Produção' },
@@ -80,6 +91,7 @@ const ROTULO_FORMATO: Record<string, string> = Object.fromEntries(
 
 export function ChavesApiPage() {
   const [criando, setCriando] = useState(false)
+  const tour = useTour('chaves-api')
   const [editando, setEditando] = useState<ChaveDeApi | null>(null)
   const [filtro, setFiltro] = useState('')
   const queryClient = useQueryClient()
@@ -122,6 +134,8 @@ export function ChavesApiPage() {
 
   return (
     <>
+      <Tour id="chaves-api" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
         <div className="row between wrap">
           <div>
@@ -132,9 +146,31 @@ export function ChavesApiPage() {
               vencimento, que é o que some quando a chave mora numa planilha.
             </p>
           </div>
-          <Botao pequeno onClick={() => setCriando(true)}>
-            Nova chave
-          </Botao>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Chaves de API"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/chaves-api',
+                  descricao:
+                    'Governo de cada chave: serviço, ambiente, escopo, onde é usada, responsável e vencimento. O valor fica no cofre.',
+                  exemplo:
+                    '[{"name":"sefaz-nfe","servico":"SEFAZ","situacao":"ativa","dias_para_vencer":14}]',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/chaves-api/{nome}',
+                  descricao:
+                    'Uma chave, com a requisição de exemplo montada e o curl pronto. O valor sai como <valor>, nunca o real.',
+                },
+              ]}
+            />
+            <Botao pequeno onClick={() => setCriando(true)}>
+              Nova chave
+            </Botao>
+          </div>
         </div>
       </header>
 
@@ -161,11 +197,13 @@ export function ChavesApiPage() {
         <CardMetrica rotulo="Ativas" valor={ativas.length} tom="brand" />
         <CardMetrica rotulo="Vencem em 30 dias" valor={vencendo.length} tom="warning" />
         <CardMetrica rotulo="Expiradas" valor={expiradas.length} tom="danger" />
-        <CardMetrica
-          rotulo="Sem uso declarado"
-          valor={semResponsavelClaro.length}
-          tom={semResponsavelClaro.length > 0 ? 'warning' : 'brand'}
-        />
+        <div data-tour="sem-uso">
+          <CardMetrica
+            rotulo="Sem uso declarado"
+            valor={semResponsavelClaro.length}
+            tom={semResponsavelClaro.length > 0 ? 'warning' : 'brand'}
+          />
+        </div>
       </div>
 
       {semResponsavelClaro.length > 0 && (
@@ -264,6 +302,7 @@ function LinhaChave({
 }) {
   const [confirmando, setConfirmando] = useState<'revogar' | 'excluir' | null>(null)
   const [erro, setErro] = useState<string | null>(null)
+  const [vendoExemplo, setVendoExemplo] = useState(false)
 
   const revogar = useMutation({
     mutationFn: () =>
@@ -305,6 +344,16 @@ function LinhaChave({
         <td className="muted">
           <code>{chave.como_usar}</code>
           <div className="help">{ROTULO_FORMATO[chave.formato] ?? chave.formato}</div>
+          {chave.url_base && (
+            <button
+              type="button"
+              className="link-sutil"
+              data-tour="ver-exemplo"
+              onClick={() => setVendoExemplo(!vendoExemplo)}
+            >
+              {vendoExemplo ? 'ocultar exemplo' : 'ver exemplo'}
+            </button>
+          )}
         </td>
         <td className="muted">
           {chave.usada_em.length === 0 ? (
@@ -341,6 +390,20 @@ function LinhaChave({
           </div>
         </td>
       </tr>
+
+      {vendoExemplo && (
+        <tr>
+          <td colSpan={7}>
+            <div style={{ padding: '4px 0 12px' }}>
+              <RequisicaoExemplo
+                linhas={chave.requisicao_exemplo}
+                curl={chave.curl_exemplo}
+                documentacaoUrl={chave.documentacao_url}
+              />
+            </div>
+          </td>
+        </tr>
+      )}
 
       {confirmando && (
         <tr>
@@ -452,6 +515,9 @@ function FormularioChave({
   const [escopo, setEscopo] = useState(chave?.escopo ?? '')
   const [usadaEm, setUsadaEm] = useState((chave?.usada_em ?? []).join(', '))
   const [responsavel, setResponsavel] = useState(chave?.responsavel ?? '')
+  const [urlBase, setUrlBase] = useState(chave?.url_base ?? '')
+  const [metodo, setMetodo] = useState(chave?.metodo ?? 'GET')
+  const [rota, setRota] = useState(chave?.rota_exemplo ?? '')
   const [cofre, setCofre] = useState(chave?.vault_name ?? '')
   const [segredo, setSegredo] = useState(chave?.secret_name ?? '')
   const [validade, setValidade] = useState(
@@ -484,6 +550,9 @@ function FormularioChave({
       .map((u) => u.trim())
       .filter(Boolean),
     responsavel,
+    url_base: urlBase.trim(),
+    metodo,
+    rota_exemplo: rota.trim(),
     vault_name: cofre,
     secret_name: segredo,
     // O input date devolve só a data; a API espera instante com fuso.
@@ -595,6 +664,45 @@ function FormularioChave({
           onChange={(e) => setEscopo(e.target.value)}
           ajuda="O que a chave permite. Ex.: somente leitura de NF-e."
         />
+
+        {/* Endereço e rota: opcionais, e é deliberado. Nem todo serviço tem
+            uma rota única que sirva de exemplo, e exigir faria alguém
+            inventar um endereço — pior que o campo vazio, porque parece
+            informação. */}
+        <Campo
+          rotulo="Endereço base (opcional)"
+          value={urlBase}
+          onChange={(e) => setUrlBase(e.target.value)}
+          placeholder="https://api.servico.com.br"
+          ajuda="Com http:// ou https://. É o que transforma 'Bearer <valor>' numa chamada que alguém consegue rodar."
+        />
+
+        <div className="row wrap" style={{ gap: 12, alignItems: 'flex-end' }}>
+          <div className="field" style={{ flex: '0 0 140px' }}>
+            <label htmlFor="chave-metodo">Método</label>
+            <select
+              id="chave-metodo"
+              className="input"
+              value={metodo}
+              onChange={(e) => setMetodo(e.target.value)}
+            >
+              {METODOS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: '1 1 240px' }}>
+            <Campo
+              rotulo="Rota de exemplo (opcional)"
+              value={rota}
+              onChange={(e) => setRota(e.target.value)}
+              placeholder="/v1/notas"
+              ajuda="Uma rota qualquer que sirva para testar se a chave responde."
+            />
+          </div>
+        </div>
         <Campo
           rotulo="Usada em"
           value={usadaEm}

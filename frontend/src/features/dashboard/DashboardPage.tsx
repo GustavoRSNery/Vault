@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/features/auth/AuthContext'
@@ -63,6 +63,16 @@ const ABAS = [
 
 type ChaveDaAba = (typeof ABAS)[number]['chave']
 
+/**
+ * Janela fixa do resumo.
+ *
+ * Sem seletor aqui de propósito: escolher período é *zoom and filter*, a
+ * segunda etapa do mantra de Shneiderman, e o resumo é a primeira. Quem quer
+ * recortar o período vai à aba Cofres, onde a mesma série aparece com o
+ * controle.
+ */
+const DIAS_DO_RESUMO = 7
+
 export function DashboardPage() {
   const { usuario } = useAuth()
   const [aba, setAba] = useState<ChaveDaAba>('resumo')
@@ -73,11 +83,15 @@ export function DashboardPage() {
     queryFn: () => request<Panorama>('/panorama'),
   })
 
+  // A janela depende da aba: o resumo usa uma fixa e curta; a aba Cofres
+  // respeita o seletor. Como a chave da query inclui os dias, trocar de aba
+  // não descarta o que já foi buscado para a outra.
+  const diasDaAba = aba === 'resumo' ? DIAS_DO_RESUMO : dias
   const { data: metricas, isLoading: carregandoMetricas } = useQuery({
-    queryKey: ['metricas', dias],
-    queryFn: () => request<Metricas>(`/metricas/serie?dias=${dias}`),
-    // Só o resumo desenha a série; as outras abas não precisam dela.
-    enabled: aba === 'resumo',
+    queryKey: ['metricas', diasDaAba],
+    queryFn: () => request<Metricas>(`/metricas/serie?dias=${diasDaAba}`),
+    // Só duas abas desenham a série; as outras não precisam dela.
+    enabled: aba === 'resumo' || aba === 'cofres',
   })
 
   const primeiroNome = usuario?.full_name.split(' ')[0] ?? ''
@@ -141,7 +155,63 @@ export function DashboardPage() {
         />
       ) : (
         <>
-          {aba === 'cofres' && <AbaCofres dados={panorama.cofres} />}
+          {aba === 'cofres' && (
+            <>
+              <AbaCofres dados={panorama.cofres} />
+
+              {/* A série completa e os rankings moram AQUI, não no resumo:
+                  período ajustável é "zoom and filter" e ranking top-8 é
+                  "details-on-demand" — as duas últimas etapas do mantra de
+                  Shneiderman, não a primeira. E o assunto deles é este
+                  domínio: quem revela segredos, e quais segredos. */}
+              <Atividade
+                metricas={metricas}
+                carregando={carregandoMetricas}
+                negados={negados}
+                seletor={
+                  <div className="pill-group">
+                    {JANELAS.map((janela) => (
+                      <button
+                        key={janela.dias}
+                        type="button"
+                        className={`pill${dias === janela.dias ? ' active' : ''}`}
+                        onClick={() => setDias(janela.dias)}
+                      >
+                        {janela.rotulo}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
+
+              {metricas?.restrito && metricas.total > 0 && (
+                <Card>
+                  <p className="help" style={{ margin: 0 }}>
+                    Os rankings de atividade — <i>quem mais revela segredos</i> e{' '}
+                    <i>o que mais é revelado</i> — exigem a capacidade{' '}
+                    <b>{metricas.capacidade_exigida}</b> no caminho de auditoria.
+                  </p>
+                </Card>
+              )}
+
+              {metricas && !metricas.restrito && metricas.por_ator.length > 0 && (
+                <div className="cards-2">
+                  <Card titulo="Quem mais revela segredos">
+                    <BarrasHorizontais
+                      itens={metricas.por_ator}
+                      descricao="Pessoas e robôs que mais revelaram segredos no período."
+                    />
+                  </Card>
+                  <Card titulo="O que mais é revelado">
+                    <BarrasHorizontais
+                      itens={metricas.por_caminho}
+                      descricao="Segredos mais revelados no período."
+                    />
+                  </Card>
+                </div>
+              )}
+            </>
+          )}
           {aba === 'credenciais' && <AbaCredenciais dados={panorama.credenciais} />}
           {aba === 'certificados' && (
             <AbaCertificados dados={panorama.certificados} />
@@ -181,108 +251,25 @@ export function DashboardPage() {
 
               <PendenciasDoResumo panorama={panorama} />
 
-              <Card
-                titulo="Atividade do cofre"
-                acao={
-                  <div className="pill-group">
-                    {JANELAS.map((janela) => (
-                      <button
-                        key={janela.dias}
-                        type="button"
-                        className={`pill${dias === janela.dias ? ' active' : ''}`}
-                        onClick={() => setDias(janela.dias)}
-                      >
-                        {janela.rotulo}
-                      </button>
-                    ))}
-                  </div>
+              {/* Um único indicador de atividade, em janela fixa e curta.
+                  Série ajustável e rankings saíram daqui para a aba Cofres:
+                  no resumo eles eram detalhe fora de lugar, e faziam a
+                  primeira tela ter mais gráfico que as de detalhe. */}
+              <Atividade
+                metricas={metricas}
+                carregando={carregandoMetricas}
+                negados={negados}
+                rodape={
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setAba('cofres')}
+                    style={{ padding: 0 }}
+                  >
+                    Ver período maior e quem mais acessa →
+                  </button>
                 }
-              >
-                {carregandoMetricas ? (
-                  <Carregando texto="Lendo a trilha…" />
-                ) : !metricas || metricas.total === 0 ? (
-                  <Vazio
-                    titulo="Nenhum movimento no período"
-                    descricao="Nada foi revelado, negado ou tentado nesta janela."
-                  />
-                ) : (
-                  <div className="col" style={{ gap: 14 }}>
-                    <div className="row between wrap" style={{ gap: 12 }}>
-                      <div className="g-legenda">
-                        <span className="item">
-                          <span className="chave k-volume" /> Movimento do dia
-                        </span>
-                        <span className="item">
-                          <span className="chave k-negado" /> Negado ou falho
-                        </span>
-                      </div>
-                      <span className="help">
-                        {/* A janela pedida e o histórico real são coisas
-                            diferentes: dizer "30 dias" num cofre instalado há
-                            3 sugeriria uma queda de atividade que não houve. */}
-                        {metricas.total} evento(s) em {metricas.dias_com_dado} dia(s)
-                        com movimento
-                        {metricas.dias_com_dado < metricas.dias &&
-                          ` · janela de ${metricas.dias} dias`}
-                      </span>
-                    </div>
-
-                    <ColunasCompactas
-                      colunas={metricas.serie.map((p) => {
-                        const total = p.sucesso + p.negado + p.falha_login
-                        const barrado = p.negado + p.falha_login
-                        return {
-                          rotulo: diaCurto(p.dia),
-                          total,
-                          destaque: barrado,
-                          descricao:
-                            `${diaCurto(p.dia)} · ${total} evento(s): ` +
-                            `${p.sucesso} concluído(s), ${p.negado} negado(s), ` +
-                            `${p.falha_login} falha(s) de login`,
-                        }
-                      })}
-                      descricao={`Atividade por dia em ${metricas.dias} dias: ${metricas.total} eventos.`}
-                    />
-
-                    {negados > 0 && (
-                      <p className="help" style={{ margin: 0 }}>
-                        <b style={{ color: 'var(--danger-text)' }}>
-                          {negados} acesso(s) negado(s)
-                        </b>{' '}
-                        no período. Negação em série costuma ser política mal
-                        dimensionada — ou alguém pedindo o que não deveria.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </Card>
-
-              {metricas?.restrito && metricas.total > 0 && (
-                <Card>
-                  <p className="help" style={{ margin: 0 }}>
-                    Os rankings de atividade — <i>quem mais revela segredos</i> e{' '}
-                    <i>o que mais é revelado</i> — exigem a capacidade{' '}
-                    <b>{metricas.capacidade_exigida}</b> no caminho de auditoria.
-                  </p>
-                </Card>
-              )}
-
-              {metricas && !metricas.restrito && metricas.por_ator.length > 0 && (
-                <div className="cards-2">
-                  <Card titulo="Quem mais revela segredos">
-                    <BarrasHorizontais
-                      itens={metricas.por_ator}
-                      descricao="Pessoas e robôs que mais revelaram segredos no período."
-                    />
-                  </Card>
-                  <Card titulo="O que mais é revelado">
-                    <BarrasHorizontais
-                      itens={metricas.por_caminho}
-                      descricao="Segredos mais revelados no período."
-                    />
-                  </Card>
-                </div>
-              )}
+              />
 
               {!usuario?.mfa_enabled && (
                 <Card>
@@ -392,6 +379,92 @@ function PendenciasDoResumo({ panorama }: { panorama: Panorama }) {
           </Link>
         ))}
       </div>
+    </Card>
+  )
+}
+
+/**
+ * A tira de atividade do cofre, com legenda e o aviso de negações.
+ *
+ * Um componente só para os dois lugares onde ela aparece — resumo e aba
+ * Cofres —, parametrizado pelo que muda: o resumo passa um `rodape` que leva
+ * ao detalhe, a aba Cofres passa o `seletor` de período. Duplicar o bloco
+ * faria os dois divergirem no primeiro ajuste.
+ */
+function Atividade({
+  metricas,
+  carregando,
+  negados,
+  seletor,
+  rodape,
+}: {
+  metricas: Metricas | undefined
+  carregando: boolean
+  negados: number
+  seletor?: ReactNode
+  rodape?: ReactNode
+}) {
+  return (
+    <Card titulo="Atividade do cofre" acao={seletor}>
+      {carregando ? (
+        <Carregando texto="Lendo a trilha…" />
+      ) : !metricas || metricas.total === 0 ? (
+        <Vazio
+          titulo="Nenhum movimento no período"
+          descricao="Nada foi revelado, negado ou tentado nesta janela."
+        />
+      ) : (
+        <div className="col" style={{ gap: 14 }}>
+          <div className="row between wrap" style={{ gap: 12 }}>
+            <div className="g-legenda">
+              <span className="item">
+                <span className="chave k-volume" /> Movimento do dia
+              </span>
+              <span className="item">
+                <span className="chave k-negado" /> Negado ou falho
+              </span>
+            </div>
+            <span className="help">
+              {/* A janela pedida e o histórico real são coisas diferentes:
+                  dizer "30 dias" num cofre instalado há 3 sugeriria uma queda
+                  de atividade que não houve. */}
+              {metricas.total} evento(s) em {metricas.dias_com_dado} dia(s) com
+              movimento
+              {metricas.dias_com_dado < metricas.dias &&
+                ` · janela de ${metricas.dias} dias`}
+            </span>
+          </div>
+
+          <ColunasCompactas
+            colunas={metricas.serie.map((p) => {
+              const total = p.sucesso + p.negado + p.falha_login
+              const barrado = p.negado + p.falha_login
+              return {
+                rotulo: diaCurto(p.dia),
+                total,
+                destaque: barrado,
+                descricao:
+                  `${diaCurto(p.dia)} · ${total} evento(s): ` +
+                  `${p.sucesso} concluído(s), ${p.negado} negado(s), ` +
+                  `${p.falha_login} falha(s) de login`,
+              }
+            })}
+            descricao={`Atividade por dia em ${metricas.dias} dias: ${metricas.total} eventos.`}
+          />
+
+          {negados > 0 && (
+            <p className="help" style={{ margin: 0 }}>
+              <b style={{ color: 'var(--danger-text)' }}>
+                {negados} acesso(s) negado(s)
+              </b>{' '}
+              no período. Negação em série costuma ser política mal dimensionada
+              — ou alguém pedindo o que não deveria.
+            </p>
+          )}
+
+          {rodape}
+        </div>
+      )}
     </Card>
   )
 }

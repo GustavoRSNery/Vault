@@ -318,3 +318,108 @@ def test_vencido_e_vencendo_nao_se_confundem(
     assert cert["validos"] == 0
     # E o "próximo a vencer" é o que ainda vale, não o mais antigo dos mortos.
     assert cert["proximo_nome"] == "quase.exemplo.com.br"
+
+
+def test_faixas_de_vencimento_nao_contam_o_mesmo_duas_vezes(
+    client: TestClient, db_session: Session, usuario: UserModel, autenticado
+) -> None:
+    """Faixas acumulativas inflariam o gráfico.
+
+    "Vence em 30 dias" e "vence em 90" descrevem o mesmo certificado se as
+    faixas forem lidas como tetos independentes. Cada item tem de cair numa
+    faixa só, e a soma tem de fechar o total — senão o gráfico mostra mais
+    itens do que existem.
+    """
+    conceder(db_session, usuario, "certificados/*", ["read", "list", "create"])
+    # Um em cada faixa, mais um já vencido.
+    _cria_certificado(client, autenticado, "morto", -3)
+    _cria_certificado(client, autenticado, "urgente", 4)
+    _cria_certificado(client, autenticado, "mes", 20)
+    _cria_certificado(client, autenticado, "trimestre", 60)
+    _cria_certificado(client, autenticado, "folgado", 300)
+
+    cert = client.get("/api/v1/panorama", headers=autenticado).json()["certificados"]
+    faixas = cert["por_vencimento"]
+
+    assert sum(f["quantas"] for f in faixas) == cert["total"] == 5, (
+        "as faixas somam o total: nenhum item fica de fora nem conta duas vezes"
+    )
+    por_rotulo = {f["rotulo"]: f["quantas"] for f in faixas}
+    assert por_rotulo["Vencido"] == 1
+    assert por_rotulo["7 dias"] == 1
+    assert por_rotulo["30 dias"] == 1
+    assert por_rotulo["90 dias"] == 1
+    assert por_rotulo["Depois"] == 1
+    # As duas primeiras faixas são as que exigem ação agora.
+    criticas = [f["rotulo"] for f in faixas if f["critica"]]
+    assert criticas == ["Vencido", "7 dias"]
+
+
+def test_credencial_nunca_rotacionada_cai_na_pior_faixa(
+    client: TestClient, db_session: Session, usuario: UserModel, autenticado
+) -> None:
+    """Nunca rotacionada é o pior caso, não um caso sem dado.
+
+    Deixá-la fora do gráfico esconderia justamente o que mais importa: uma
+    senha que pode ainda ser a de fábrica.
+    """
+    _tudo(db_session, usuario)
+    client.post(
+        "/api/v1/dispositivos",
+        headers=autenticado,
+        json={"name": "sw", "display_name": "Switch", "kind": "switch"},
+    )
+    client.post(
+        "/api/v1/dispositivos/sw/credenciais",
+        headers=autenticado,
+        json={"name": "senha-sw", "username": "admin", "rotation_days": 90},
+    )
+
+    cred = client.get("/api/v1/panorama", headers=autenticado).json()["credenciais"]
+    faixas = {f["rotulo"]: f["quantas"] for f in cred["por_rotacao"]}
+
+    assert faixas["Mais de 180d"] == 1, "nunca rotacionada vai para a pior faixa"
+    assert sum(f["quantas"] for f in cred["por_rotacao"]) == cred["total"]
+
+
+def test_chave_revogada_sai_do_grafico_de_vencimento(
+    client: TestClient, db_session: Session, usuario: UserModel, autenticado
+) -> None:
+    """Revogada não tem vencimento futuro a planejar.
+
+    O gráfico responde "quando as chaves que estão em uso vão expirar". Uma
+    revogada empilharia o passado sobre o que vem, e levaria alguém a
+    programar a troca de uma chave que já saiu de circulação.
+    """
+    _tudo(db_session, usuario)
+
+    def criar(nome: str, dias: int):
+        return client.post(
+            "/api/v1/chaves-api",
+            headers=autenticado,
+            json={
+                "name": nome,
+                "display_name": nome,
+                "servico": "SEFAZ",
+                "responsavel": "fiscal@exemplo.com.br",
+                # O cadastro recebe o PRAZO, não a data: a data de
+                # vencimento é derivada no servidor, para não depender do
+                # relógio de quem chama.
+                "dias_de_validade": dias,
+            },
+        )
+
+    assert criar("viva", 20).status_code == 201
+    assert criar("morta", 25).status_code == 201
+    client.post("/api/v1/chaves-api/morta/revogar", headers=autenticado)
+
+    chaves = client.get("/api/v1/panorama", headers=autenticado).json()["chaves"]
+
+    assert chaves["total"] == 2
+    assert chaves["ativas"] == 1
+    assert chaves["revogadas"] == 1
+    # Só a viva entra no gráfico: a soma das faixas conta as ATIVAS com
+    # vencimento, não o acervo inteiro.
+    assert sum(f["quantas"] for f in chaves["por_vencimento"]) == 1
+    por_rotulo = {f["rotulo"]: f["quantas"] for f in chaves["por_vencimento"]}
+    assert por_rotulo["30 dias"] == 1

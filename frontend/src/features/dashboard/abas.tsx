@@ -17,6 +17,8 @@ import { BarraDeProporcao } from '@/shared/charts'
 
 export type Destaque = { rotulo: string; quantas: number; tom: string }
 
+export type FaixaDeTempo = { rotulo: string; quantas: number; critica: boolean }
+
 export type Panorama = {
   cofres: {
     total: number
@@ -32,6 +34,7 @@ export type Panorama = {
     custodia_vencida: number
     rotacao_atrasada: number
     nunca_rotacionadas: number
+    por_rotacao: FaixaDeTempo[]
     destaques: Destaque[]
   }
   certificados: {
@@ -41,6 +44,7 @@ export type Panorama = {
     validos: number
     proximo_nome: string
     proximo_dias: number | null
+    por_vencimento: FaixaDeTempo[]
     destaques: Destaque[]
   }
   chaves: {
@@ -49,6 +53,7 @@ export type Panorama = {
     revogadas: number
     expiradas: number
     sem_vencimento: number
+    por_vencimento: FaixaDeTempo[]
     destaques: Destaque[]
   }
   dispositivos: {
@@ -95,6 +100,68 @@ function Destaques({ itens }: { itens: Destaque[] }) {
     <div className="col" style={{ gap: 10 }}>
       {itens.map((d) => (
         <LinhaDeDestaque key={d.rotulo} destaque={d} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Distribuição por faixa de tempo.
+ *
+ * É o gráfico que justifica a existência da aba de detalhe: o resumo diz
+ * *quantos* estão vencendo, e esta tira diz *quando* — a informação
+ * necessária para planejar, que não cabe num número só.
+ *
+ * **Barras horizontais, não colunas.** São 4 ou 5 faixas, e com poucas
+ * categorias de valor parecido as colunas saem todas da mesma altura: a
+ * forma deixa de informar e sobra só a cor. Na horizontal o número fica
+ * escrito ao lado de cada barra, então a leitura não depende de comparar
+ * alturas quase iguais.
+ *
+ * Faixa crítica vem na cor de alerta. Cor aqui não é enfeite: separa o que
+ * exige ação agora do que entra no planejamento.
+ */
+function LinhaDoTempo({ faixas }: { faixas: FaixaDeTempo[] }) {
+  const total = faixas.reduce((soma, f) => soma + f.quantas, 0)
+  if (total === 0) return null
+  const maior = Math.max(...faixas.map((f) => f.quantas))
+
+  return (
+    <div className="col" style={{ gap: 7 }}>
+      {faixas.map((faixa) => (
+        <div key={faixa.rotulo} className="row" style={{ gap: 10 }}>
+          <span
+            className="help"
+            style={{ width: 96, textAlign: 'right', flex: 'none' }}
+          >
+            {faixa.rotulo}
+          </span>
+          {/* A barra mede contra a MAIOR faixa, não contra o total: com 1 de
+              5 em cada faixa, medir pelo total daria cinco fios de 20% e
+              nada se distinguiria. */}
+          <span
+            className="faixa-trilho"
+            role="img"
+            aria-label={`${faixa.rotulo}: ${faixa.quantas}`}
+          >
+            <span
+              className={faixa.critica ? 'faixa-barra critica' : 'faixa-barra'}
+              style={{
+                width: `${Math.max((faixa.quantas / maior) * 100, faixa.quantas > 0 ? 3 : 0)}%`,
+              }}
+            />
+          </span>
+          <b
+            style={{
+              width: 28,
+              flex: 'none',
+              fontVariantNumeric: 'tabular-nums',
+              color: faixa.quantas === 0 ? 'var(--ink-muted)' : undefined,
+            }}
+          >
+            {faixa.quantas}
+          </b>
+        </div>
       ))}
     </div>
   )
@@ -214,6 +281,18 @@ export function AbaCredenciais({ dados }: { dados: Panorama['credenciais'] }) {
           <Destaques itens={dados.destaques} />
         </Card>
       </div>
+
+      <Card titulo="Há quanto tempo foram trocadas">
+        <div className="col" style={{ gap: 10 }}>
+          <LinhaDoTempo
+            faixas={dados.por_rotacao}
+          />
+          <p className="help" style={{ margin: 0 }}>
+            Quem nunca rotacionou entra na última faixa: é o pior caso, não um
+            caso sem dado.
+          </p>
+        </div>
+      </Card>
     </>
   )
 }
@@ -276,6 +355,18 @@ export function AbaCertificados({ dados }: { dados: Panorama['certificados'] }) 
           <Destaques itens={dados.destaques} />
         </Card>
       </div>
+
+      <Card titulo="Quando vencem">
+        <div className="col" style={{ gap: 10 }}>
+          <LinhaDoTempo
+            faixas={dados.por_vencimento}
+          />
+          <p className="help" style={{ margin: 0 }}>
+            O resumo diz quantos estão vencendo; isto diz <b>quando</b> — que é
+            o que permite programar as renovações em vez de reagir a elas.
+          </p>
+        </div>
+      </Card>
     </>
   )
 }
@@ -338,6 +429,18 @@ export function AbaChaves({ dados }: { dados: Panorama['chaves'] }) {
           <Destaques itens={dados.destaques} />
         </Card>
       </div>
+
+      <Card titulo="Quando as ativas vencem">
+        <div className="col" style={{ gap: 10 }}>
+          <LinhaDoTempo
+            faixas={dados.por_vencimento}
+          />
+          <p className="help" style={{ margin: 0 }}>
+            Só as ativas aparecem aqui: revogada ou expirada não tem
+            vencimento futuro a planejar.
+          </p>
+        </div>
+      </Card>
     </>
   )
 }

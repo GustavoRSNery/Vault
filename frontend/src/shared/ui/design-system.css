@@ -230,6 +230,21 @@ h2.title{margin:0;font-size:16px;line-height:24px;font-weight:600}
 /* Tira de atividade: SVG so com as colunas, rotulos em HTML embaixo.
    O SVG estica sem manter proporcao (e o que permite altura fixa em px),
    e texto esticado denunciaria a deformacao — por isso os rotulos saem. */
+/* Faixa de tempo: barra horizontal com rotulo a esquerda e numero a
+   direita. Poucas categorias de valor parecido viram colunas iguais, e
+   ai a forma nao informa nada — na horizontal o numero resolve. */
+/* Card de sessao ativa: o tempo decorrido e o dado que muda sozinho, e
+   por isso ganha peso e numero tabular — sem ele os digitos dancam a
+   cada segundo. */
+/* Linha de maquina disponivel: a borda so aparece no hover, para a lista
+   nao virar uma grade de caixas quando ha muitas maquinas. */
+.maquina-linha{padding:12px 14px;border-radius:12px;border:1px solid transparent}
+.maquina-linha:hover{background:var(--surface-200);border-color:var(--border)}
+.sessao-card{padding:16px 18px}
+.sessao-tempo{font-family:var(--mono);font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--brand-text)}
+.faixa-trilho{flex:1;height:10px;border-radius:999px;background:var(--surface-200);overflow:hidden;display:block}
+.faixa-barra{display:block;height:100%;border-radius:999px;background:var(--brand-soft)}
+.faixa-barra.critica{background:var(--danger-text)}
 .tira{display:flex;flex-direction:column;gap:6px}
 .tira-svg{width:100%;display:block}
 .tira-rotulos{display:grid;font-size:10.5px;color:var(--ink-muted);font-family:var(--sans)}
@@ -266,3 +281,86 @@ h2.title{margin:0;font-size:16px;line-height:24px;font-weight:600}
    a largura total já é o 100%. */
 .proporcao{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--surface-200)}
 .proporcao span{display:block;height:100%}
+
+/* Terminal: os comandos que a pessoa roda na máquina dela.
+
+   Fundo escuro mesmo no tema claro, de propósito — é a convenção que diz
+   "isto se cola num shell", e não mais um campo da tela. A fonte
+   monoespaçada não é enfeite: num comando, `l` e `1` precisam se
+   distinguir, e o alinhamento revela o espaço que separa os argumentos. */
+.terminal{background:oklch(.22 .02 165);border-radius:var(--radius-card);padding:4px 0;overflow:hidden}
+.terminal-bloco{padding:12px 16px;border-bottom:1px solid oklch(.3 .02 165)}
+.terminal-bloco:last-child{border-bottom:none}
+.terminal-titulo{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:10.5px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:oklch(.72 .03 165);margin-bottom:7px}
+.terminal-copiar{background:none;border:1px solid oklch(.38 .02 165);color:oklch(.78 .02 165);border-radius:999px;padding:2px 10px;font-size:10px;letter-spacing:.6px;cursor:pointer;text-transform:lowercase}
+.terminal-copiar:hover{border-color:oklch(.55 .02 165);color:oklch(.92 .01 165)}
+.terminal-linha{display:flex;gap:9px;align-items:flex-start;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:oklch(.93 .01 165);word-break:break-all}
+/* O `$` em verde é o prompt: marca onde o comando começa, para quem cola um
+   bloco de várias linhas não arrastar o símbolo junto. */
+.terminal-prompt{color:oklch(.78 .16 150);flex:none;user-select:none}
+.terminal-explica{margin-top:7px;font-size:12px;color:oklch(.68 .02 165)}
+
+/* Alternador discreto dentro de uma célula de tabela: é um controle, mas não
+   compete com os botões de ação da linha. */
+.link-sutil{background:none;border:none;padding:0;margin-top:3px;font-size:11.5px;color:var(--brand-text);cursor:pointer;text-decoration:underline;font-family:inherit}
+.link-sutil:hover{color:var(--ink)}
+
+/* Voltar: o caminho de saída de uma subtela.
+
+   Discreto de propósito — é orientação, não ação. Um botão forte aqui
+   competiria com o que a pessoa veio fazer na tela. */
+.voltar{display:inline-flex;align-items:center;gap:5px;background:none;border:none;padding:0;margin:0 0 10px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--ink-muted);text-decoration:none;cursor:pointer}
+.voltar:hover{color:var(--brand-text)}
+.voltar svg{flex:none}
+
+/* Tour: cortina escura com recorte no elemento explicado.
+
+   O recorte (e não uma borda colorida) diz "olhe aqui" sem acrescentar mais
+   uma cor à interface que está justamente sendo explicada. */
+.tour-cortina{position:fixed;inset:0;z-index:100;background:oklch(.22 .02 165/.55);animation:tour-entra .16s ease}
+@keyframes tour-entra{from{opacity:0}to{opacity:1}}
+/* A sombra gigante é o truque do recorte: ela preenche a tela inteira ao
+   redor do retângulo, que fica limpo. */
+.tour-recorte{position:fixed;border-radius:12px;box-shadow:0 0 0 9999px oklch(.22 .02 165/.55),0 0 0 2px var(--brand);background:transparent;pointer-events:none;transition:all .18s ease}
+.tour-balao{position:fixed;background:var(--surface-100);border-radius:var(--radius-card);box-shadow:0 18px 50px oklch(.22 .02 165/.3);padding:18px 20px;max-width:calc(100vw - 24px)}
+.tour-balao.seta-cima::before,.tour-balao.seta-baixo::before{content:"";position:absolute;left:50%;margin-left:-7px;border:7px solid transparent}
+.tour-balao.seta-cima::before{top:-14px;border-bottom-color:var(--surface-100)}
+.tour-balao.seta-baixo::before{bottom:-14px;border-top-color:var(--surface-100)}
+.tour-cap{font-size:10.5px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:var(--brand-text)}
+.tour-titulo{margin:7px 0 6px;font-size:16px;font-weight:700;letter-spacing:-.2px}
+.tour-texto{margin:0;font-size:13.5px;line-height:1.6;color:var(--ink-muted)}
+.tour-pontos{display:flex;gap:5px;margin:14px 0 12px}
+.tour-pontos span{width:6px;height:6px;border-radius:999px;background:var(--border-strong)}
+.tour-pontos span.ativo{background:var(--brand);width:18px}
+.tour-acoes{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.tour-pular{background:none;border:none;padding:0;font-family:inherit;font-size:12.5px;color:var(--ink-muted);cursor:pointer;text-decoration:underline}
+.tour-pular:hover{color:var(--ink)}
+
+/* Linha de tabela que navega. O cursor e o realce dizem que é clicável antes
+   do clique — sem isso, a pessoa descobre por acidente ou nunca descobre. */
+.linha-clicavel{cursor:pointer}
+.linha-clicavel:hover{background:var(--brand-faint)}
+.linha-clicavel:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+
+/* Grade de gravações: escolher uma, não comparar todas.
+
+   `auto-fill` com mínimo de 240px dá 2 a 5 colunas conforme a largura, sem
+   ponto de quebra escrito à mão — que é o que envelhece mal. */
+.grade-gravacoes{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.cartao-gravacao{display:flex;flex-direction:column;text-decoration:none;color:var(--ink);border-radius:var(--radius-card);overflow:hidden;border:1px solid var(--border);background:var(--surface-100);transition:transform .12s ease,box-shadow .12s ease}
+.cartao-gravacao:hover{transform:translateY(-2px);box-shadow:var(--shadow-card)}
+.cartao-gravacao:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+/* A "capa": barras de atividade sobre fundo escuro, como a faixa de
+   progresso de um vídeo. Escura porque é conteúdo de terminal. */
+.gravacao-capa{position:relative;height:104px;background:oklch(.24 .02 165);display:flex;align-items:flex-end;padding:10px 12px}
+.gravacao-barras{display:flex;align-items:flex-end;gap:3px;width:100%;height:100%}
+.gravacao-barras span{flex:1;background:linear-gradient(to top,oklch(.62 .14 295),oklch(.74 .12 295));border-radius:2px;min-height:4px}
+.gravacao-duracao{position:absolute;right:8px;bottom:8px;background:oklch(.18 .02 165/.85);color:#fff;font-size:11px;font-weight:600;padding:2px 7px;border-radius:5px;font-variant-numeric:tabular-nums}
+.gravacao-selo{position:absolute;left:8px;top:8px;font-size:10px;font-weight:700;letter-spacing:.5px;padding:2px 8px;border-radius:999px;text-transform:uppercase}
+/* Capturada por proxy e anotada à mão não merecem a mesma confiança numa
+   investigação — e por isso não têm a mesma cor. */
+.selo-auto{background:var(--success-soft);color:var(--success-text)}
+.selo-manual{background:var(--warning-soft);color:var(--warning-text)}
+.gravacao-corpo{display:flex;flex-direction:column;padding:12px 14px 14px;gap:2px}
+.gravacao-alvo{font-size:14px;letter-spacing:-.2px;word-break:break-word}

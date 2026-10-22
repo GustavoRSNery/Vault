@@ -459,3 +459,154 @@ class TestLimites:
             },
         )
         assert resposta.status_code == 201
+
+
+class TestAprovarEmLote:
+    """Aprovar vários de uma vez é conveniência, não atalho.
+
+    Cada pedido do lote passa pela mesma checagem de permissão e pela mesma
+    regra de domínio da aprovação individual, e gera o seu próprio evento de
+    auditoria — um evento único de "lote aprovado" esconderia *o que* foi
+    concedido.
+    """
+
+    def _tres_pedidos(
+        self, client: TestClient, db_session: Session, usuario: UserModel
+    ) -> tuple[list[str], dict[str, str]]:
+        conceder(db_session, usuario, "cofres/*", TODAS, nome_politica="p-dono")
+        _cofre_com_segredo(client, _login(client, EMAIL, SENHA))
+        ana = _ana(db_session)
+        conceder(
+            db_session, ana, "cofres/contabil/*", ["read", "list"],
+            nome_politica="p-ana",
+        )
+        dela = _login(client, ANA_EMAIL, ANA_SENHA)
+
+        ids = []
+        for i in range(3):
+            pedido = client.post(
+                "/api/v1/solicitacoes",
+                headers=dela,
+                json={
+                    "path": "cofres/contabil/segredos/token-sefaz",
+                    "capabilities": ["reveal"],
+                    "reason": f"Guia {i}",
+                    "hours": 4,
+                },
+            )
+            assert pedido.status_code == 201, pedido.text
+            ids.append(pedido.json()["id"])
+        return ids, dela
+
+    def test_aprova_todos_e_relata_cada_um(
+        self, client: TestClient, db_session: Session, usuario: UserModel,
+        autenticado: dict[str, str],
+    ) -> None:
+        ids, _ = self._tres_pedidos(client, db_session, usuario)
+
+        resposta = client.post(
+            "/api/v1/solicitacoes/aprovar-em-lote",
+            headers=autenticado,
+            json={"ids": ids, "note": "Aprovado em lote"},
+        )
+
+        assert resposta.status_code == 200, resposta.text
+        corpo = resposta.json()
+        assert corpo["aprovadas"] == 3
+        assert corpo["recusadas"] == 0
+        # O relatório cobre todos os ids enviados: aprovar 3 e devolver 2
+        # resultados deixaria o terceiro sem explicação.
+        assert {r["id"] for r in corpo["resultados"]} == set(ids)
+        assert all(r["aprovada"] for r in corpo["resultados"])
+
+    def test_cada_aprovacao_gera_seu_evento(
+        self, client: TestClient, db_session: Session, usuario: UserModel,
+        autenticado: dict[str, str],
+    ) -> None:
+        """Um evento só de "lote" esconderia o que foi concedido."""
+        conceder(db_session, usuario, "auditoria", ["admin"], nome_politica="p-aud")
+        ids, _ = self._tres_pedidos(client, db_session, usuario)
+
+        client.post(
+            "/api/v1/solicitacoes/aprovar-em-lote",
+            headers=autenticado,
+            json={"ids": ids},
+        )
+
+        trilha = client.get("/api/v1/auditoria", headers=autenticado).json()["eventos"]
+        aprovacoes = [e for e in trilha if e["action"] == "acesso_aprovado"]
+        assert len(aprovacoes) == 3, "um evento por pedido, não um pelo lote"
+
+    def test_falha_de_um_nao_derruba_os_outros(
+        self, client: TestClient, db_session: Session, usuario: UserModel,
+        autenticado: dict[str, str],
+    ) -> None:
+        """Pedido já decidido entra como recusado, e os demais seguem."""
+        ids, _ = self._tres_pedidos(client, db_session, usuario)
+        # Decide o primeiro antes do lote.
+        primeira = client.post(
+            f"/api/v1/solicitacoes/{ids[0]}/aprovar",
+            headers=autenticado,
+            json={"note": ""},
+        )
+        assert primeira.status_code == 200, primeira.text
+        assert primeira.json()["status"] == "aprovada", primeira.json()
+
+        resposta = client.post(
+            "/api/v1/solicitacoes/aprovar-em-lote",
+            headers=autenticado,
+            json={"ids": ids},
+        )
+
+        corpo = resposta.json()
+        assert corpo["aprovadas"] == 2
+        assert corpo["recusadas"] == 1
+        recusado = next(r for r in corpo["resultados"] if not r["aprovada"])
+        assert recusado["id"] == ids[0]
+        # A razão aparece: "aprovado 2 de 3" sem dizer por quê seria pior que
+        # não ter o botão.
+        assert recusado["erro"]
+
+    def test_id_repetido_aprova_uma_vez_so(
+        self, client: TestClient, db_session: Session, usuario: UserModel,
+        autenticado: dict[str, str],
+    ) -> None:
+        """A tela pode mandar duplicata sem aprovar duas vezes."""
+        ids, _ = self._tres_pedidos(client, db_session, usuario)
+
+        corpo = client.post(
+            "/api/v1/solicitacoes/aprovar-em-lote",
+            headers=autenticado,
+            json={"ids": [ids[0], ids[0], ids[1]]},
+        ).json()
+
+        assert corpo["aprovadas"] == 2
+        assert corpo["recusadas"] == 0
+        assert len(corpo["resultados"]) == 2
+
+    def test_sem_permissao_nenhum_e_aprovado(
+        self, client: TestClient, db_session: Session, usuario: UserModel,
+        autenticado: dict[str, str],
+    ) -> None:
+        """O lote não é caminho lateral para quem não pode aprovar."""
+        ids, dela = self._tres_pedidos(client, db_session, usuario)
+
+        # A própria Ana, que só tem read/list, tenta aprovar os pedidos dela.
+        corpo = client.post(
+            "/api/v1/solicitacoes/aprovar-em-lote", headers=dela, json={"ids": ids}
+        ).json()
+
+        assert corpo["aprovadas"] == 0
+        assert corpo["recusadas"] == 3
+        fila = client.get("/api/v1/solicitacoes/fila", headers=autenticado).json()
+        assert all(p["status"] == "pendente" for p in fila)
+
+    def test_lote_vazio_e_recusado(
+        self, client: TestClient, autenticado: dict[str, str]
+    ) -> None:
+        resposta = client.post(
+            "/api/v1/solicitacoes/aprovar-em-lote",
+            headers=autenticado,
+            json={"ids": []},
+        )
+        assert resposta.status_code == 422

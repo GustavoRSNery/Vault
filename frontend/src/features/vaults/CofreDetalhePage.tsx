@@ -6,6 +6,7 @@ import { CampoSegredo } from '@/features/secrets/CampoSegredo'
 import { SeloQuorum } from './SeloQuorum'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
+import { Voltar } from '@/shared/ui/Voltar'
 
 type Segredo = {
   id: string
@@ -137,6 +138,7 @@ export function CofreDetalhePage() {
   return (
     <>
       <header>
+        <Voltar para="/cofres" rotulo="Todos os cofres" />
         <nav className="crumbs" style={{ marginBottom: 6 }}>
           <Link to="/cofres">Cofres</Link> <span aria-hidden="true">›</span>{' '}
           {cofre?.display_name ?? nome}

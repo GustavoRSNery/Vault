@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { request } from '@/shared/api/client'
 import { Card, Carregando, EstadoCofre, Vazio } from '@/shared/ui/components'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 
 export type Cofre = {
   id: string
@@ -21,6 +23,8 @@ export function useCofres() {
 
 export function CofresPage() {
   const { data: cofres, isLoading, error } = useCofres()
+  const navegar = useNavigate()
+  const tour = useTour('cofres')
 
   if (isLoading) return <Carregando texto="Carregando cofres…" />
   if (error) {
@@ -34,9 +38,41 @@ export function CofresPage() {
 
   return (
     <>
+      <Tour id="cofres" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
-        <h1 className="display">Cofres</h1>
-        <p className="sub">Os cofres a que você tem acesso.</p>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <div>
+            <h1 className="display">Cofres</h1>
+            <p className="sub" style={{ margin: '4px 0 0' }}>
+              Os cofres a que você tem acesso. É aqui que o <b>valor</b> de um
+              segredo mora, cifrado.
+            </p>
+          </div>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Cofres"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/cofres',
+                  descricao:
+                    'Os cofres que o seu token alcança. A filtragem é no servidor: cofre sem permissão não aparece na resposta.',
+                  exemplo: '[{"name":"infra","display_name":"Infra","state":"ativo"}]',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/cofres/{nome}/segredos',
+                  descricao:
+                    'Os segredos de um cofre: nome, tipo e versão atual. O valor NÃO vem — para isso existe a rota de revelar, que audita.',
+                  exemplo:
+                    '[{"name":"senha-root","kind":"senha","current_version":3}]',
+                },
+              ]}
+            />
+          </div>
+        </div>
       </header>
 
       <Card>
@@ -56,18 +92,35 @@ export function CofresPage() {
                 </tr>
               </thead>
               <tbody>
-                {cofres.map((cofre) => (
-                  <tr key={cofre.id}>
+                {cofres.map((cofre, indice) => (
+                  // A linha inteira abre o cofre. Alvo de clique do tamanho
+                  // do texto obriga a mirar; a linha toda é o que a pessoa
+                  // já tenta clicar antes de descobrir que não funciona.
+                  //
+                  // `role="link"` e `tabIndex` porque `<tr>` não é focável:
+                  // sem isso, quem navega por teclado não alcança o cofre.
+                  <tr
+                    key={cofre.id}
+                    className="linha-clicavel"
+                    role="link"
+                    tabIndex={0}
+                    data-tour={indice === 0 ? 'linha-cofre' : undefined}
+                    onClick={() => navegar(`/cofres/${cofre.name}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        navegar(`/cofres/${cofre.name}`)
+                      }
+                    }}
+                  >
                     <td className="strong">
-                      <Link
-                        to={`/cofres/${cofre.name}`}
-                        style={{ color: 'var(--brand-text)', textDecoration: 'none' }}
-                      >
+                      <span style={{ color: 'var(--brand-text)' }}>
                         {cofre.display_name}
-                      </Link>
+                      </span>
+                      <div className="help">{cofre.name}</div>
                     </td>
                     <td className="muted">{cofre.description || '—'}</td>
-                    <td>
+                    <td data-tour={indice === 0 ? 'estado-cofre' : undefined}>
                       <EstadoCofre estado={cofre.state} />
                     </td>
                   </tr>
