@@ -23,6 +23,7 @@ from app.domain.sessions.entities import (
     OCIOSA_MINUTOS_MAXIMO,
     EstadoDaSessao,
     EventoDeSessao,
+    MotivoDaSessao,
     Sessao,
     TipoDeEvento,
     TipoDeSessao,
@@ -39,6 +40,9 @@ def _sessao(**kwargs) -> Sessao:  # noqa: ANN003
         "usuario_label": "ana@exemplo.com.br",
         "tipo": TipoDeSessao.SSH,
         "alvo": "srv-producao",
+        # O motivo é obrigatório e vem da lista fechada: sem ele a sessão
+        # não é mensurável, e o domínio recusa.
+        "motivo": str(MotivoDaSessao.MANUTENCAO),
         "iniciada_em": AGORA,
         "ultima_atividade_em": AGORA,
     }
@@ -252,3 +256,48 @@ class TestLinhaDoTempoEBusca:
         s = _sessao()
         s.encerrar(por="ana", now=AGORA + timedelta(seconds=90))
         assert s.duracao_ms == 90_000
+
+
+class TestMotivoLegado:
+    """`legado=True` desliga a checagem da LISTA, e só ela.
+
+    Sessões gravadas antes de a lista fechar têm motivo livre. Recusá-las na
+    leitura derrubaria a listagem inteira por causa de um registro antigo —
+    mas afrouxar demais transformaria "aceitar o passado" em "aceitar
+    qualquer coisa", e a lista fechada perderia o sentido.
+
+    Estes testes ficam no domínio de propósito: pela API o Pydantic recusa o
+    valor antes, então um afrouxamento aqui passaria despercebido lá.
+    """
+
+    def test_motivo_fora_da_lista_e_recusado_na_criacao(self) -> None:
+        with pytest.raises(ValidationError, match="não é uma opção"):
+            _sessao(motivo="Conferencia do fechamento")
+
+    def test_motivo_fora_da_lista_e_aceito_quando_legado(self) -> None:
+        sessao = _sessao(motivo="Conferencia do fechamento", legado=True)
+        # Chega como está: reescrever faria a trilha afirmar um motivo que
+        # ninguém digitou.
+        assert sessao.motivo == "Conferencia do fechamento"
+
+    def test_legado_NAO_aceita_motivo_vazio(self) -> None:
+        """A tolerância é só para a lista.
+
+        Motivo em branco não é registro legado: é registro sem informação, e
+        aceitá-lo deixaria entrar pelo repositório o que a criação recusa.
+        """
+        with pytest.raises(ValidationError, match="Informe o motivo"):
+            _sessao(motivo="", legado=True)
+
+    def test_legado_NAO_aceita_alvo_vazio(self) -> None:
+        """Nenhuma outra regra do domínio é afetada por `legado`."""
+        with pytest.raises(ValidationError, match="alvo"):
+            _sessao(alvo="", legado=True)
+
+    def test_motivo_valido_funciona_igual_com_legado(self) -> None:
+        sessao = _sessao(motivo=str(MotivoDaSessao.INCIDENTE), legado=True)
+        assert sessao.motivo == "incidente"
+
+    def test_padrao_e_nao_legado(self) -> None:
+        """Quem constrói sem dizer nada está criando, não lendo do banco."""
+        assert _sessao().legado is False

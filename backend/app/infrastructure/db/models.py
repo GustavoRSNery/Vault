@@ -360,6 +360,11 @@ class CertificateModel(Base):
     secret_id: Mapped[str | None] = mapped_column(
         ForeignKey("segredos.id", ondelete="SET NULL"), nullable=True
     )
+    # Nome original e cofre do arquivo guardado. O CONTEUDO vive no segredo,
+    # cifrado; aqui fica so o bastante para a tela dizer "ha um .pfx" e para
+    # a devolucao sair com o nome certo.
+    arquivo_nome: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    arquivo_cofre: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = _now_column()
 
@@ -588,6 +593,9 @@ class SessaoModel(Base):
     tipo: Mapped[str] = mapped_column(String(20), nullable=False)
     alvo: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
     motivo: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Ticket, chamado, nome do incidente. Livre porque e descricao, nao
+    # categoria: a categoria e `motivo`, de lista fechada.
+    motivo_detalhe: Mapped[str] = mapped_column(Text, default="", nullable=False)
     segredo_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
     estado: Mapped[str] = mapped_column(
         String(20), default="ativa", nullable=False, index=True
@@ -727,6 +735,10 @@ class ChaveApiModel(Base):
     usada_em: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     responsavel: Mapped[str] = mapped_column(String(200), nullable=False)
     documentacao_url: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    # Endereco e rota de exemplo: o que falta para a primeira chamada rodar.
+    url_base: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    metodo: Mapped[str] = mapped_column(String(10), default="GET", nullable=False)
+    rota_exemplo: Mapped[str] = mapped_column(String(300), default="", nullable=False)
     secret_id: Mapped[str | None] = mapped_column(
         ForeignKey("segredos.id", ondelete="SET NULL"), nullable=True
     )

@@ -5,6 +5,9 @@ import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/u
 import { formatarDataHora } from '@/shared/lib/formato'
 import { baixarJson } from '@/shared/lib/baixar'
 import { useAuth } from '@/features/auth/AuthContext'
+import { ImportarCredenciais, NovaCredencial } from './NovaCredencial'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 
 type Custodia = {
   id: string
@@ -39,6 +42,9 @@ export function CredenciaisPage() {
   const [erro, setErro] = useState<string | null>(null)
   const [retirando, setRetirando] = useState<string | null>(null)
   const [verHistorico, setVerHistorico] = useState<string | null>(null)
+  const [criando, setCriando] = useState(false)
+  const [importando, setImportando] = useState(false)
+  const tour = useTour('credenciais')
 
   const exportar = useMutation({
     mutationFn: (credencial: Credencial) =>
@@ -84,8 +90,55 @@ export function CredenciaisPage() {
 
   return (
     <>
+      <Tour id="credenciais" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
-        <h1 className="display">Credenciais</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Credenciais</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Credenciais"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/credenciais',
+                  descricao:
+                    'Governo de cada credencial: equipamento, usuário, prazo de rotação e quem está com ela. Nunca a senha.',
+                  exemplo:
+                    '[{"name":"senha-root","device_name":"srv-db-01","atrasada":true}]',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/dispositivos',
+                  descricao:
+                    'Os equipamentos a que as credenciais pertencem — útil para cruzar com a listagem acima.',
+                },
+              ]}
+              observacao="Retirar e devolver são escrita: passam pela tela, porque exigem justificativa que vai para a trilha."
+            />
+            <Botao
+              variante="secondary"
+              pequeno
+              data-tour="importar"
+              onClick={() => {
+                setImportando(true)
+                setCriando(false)
+              }}
+            >
+              Importar JSON
+            </Botao>
+            <Botao
+              pequeno
+              onClick={() => {
+                setCriando(true)
+                setImportando(false)
+              }}
+            >
+              Nova credencial
+            </Botao>
+          </div>
+        </div>
         <p className="sub" style={{ margin: '4px 0 0' }}>
           {credenciais?.length ?? 0} credencia{(credenciais?.length ?? 0) === 1 ? 'l' : 'is'}
           {atrasadas > 0 && <> · <b>{atrasadas}</b> com rotação atrasada</>}
@@ -95,6 +148,23 @@ export function CredenciaisPage() {
       </header>
 
       {erro && <Alerta tom="danger">{erro}</Alerta>}
+
+      {criando && (
+        <NovaCredencial
+          aoFechar={() => setCriando(false)}
+          aoCriar={() => {
+            setCriando(false)
+            invalidar()
+          }}
+        />
+      )}
+
+      {importando && (
+        <ImportarCredenciais
+          aoFechar={() => setImportando(false)}
+          aoImportar={invalidar}
+        />
+      )}
 
       {atrasadas > 0 && (
         <Alerta tom="warning">
@@ -111,7 +181,12 @@ export function CredenciaisPage() {
         {!credenciais || credenciais.length === 0 ? (
           <Vazio
             titulo="Nenhuma credencial cadastrada"
-            descricao="Cadastre um dispositivo e suas credenciais para acompanhar rotação e custódia."
+            descricao="A credencial pertence a um equipamento: cadastre o dispositivo primeiro, depois as senhas que ele guarda."
+            acao={
+              <Botao pequeno onClick={() => setCriando(true)}>
+                Nova credencial
+              </Botao>
+            }
           />
         ) : (
           <div className="tbl-wrap">
@@ -135,7 +210,7 @@ export function CredenciaisPage() {
                         {c.username && <div className="help">{c.username}</div>}
                       </td>
                       <td className="muted">{c.device_name}</td>
-                      <td>
+                      <td data-tour="rotacao">
                         <EstadoRotacao credencial={c} />
                       </td>
                       <td>
@@ -192,6 +267,7 @@ export function CredenciaisPage() {
                           ) : (
                             <Botao
                               pequeno
+                              data-tour="retirar"
                               onClick={() =>
                                 setRetirando(retirando === c.id ? null : c.id)
                               }

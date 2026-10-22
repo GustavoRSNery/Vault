@@ -332,7 +332,12 @@ class Certificate:
     not_after: datetime
     owner_label: str = ""
     serial: str = ""
+    # Quando o arquivo foi guardado, `secret_id` aponta para o segredo
+    # cifrado e estes dois dizem de onde ele veio. Guardar o conteúdo aqui
+    # o deixaria legível para quem só acompanha vencimento — que é a maioria.
     secret_id: str | None = None
+    arquivo_nome: str = ""
+    arquivo_cofre: str = ""
     description: str = ""
     created_at: datetime = field(default_factory=utcnow)
     id: str = field(default_factory=new_id)

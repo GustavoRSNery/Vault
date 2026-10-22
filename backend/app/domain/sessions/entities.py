@@ -56,6 +56,24 @@ class TipoDeSessao(StrEnum):
     OUTRO = "outro"
 
 
+class MotivoDaSessao(StrEnum):
+    """Por que a sessão foi aberta.
+
+    Lista fechada de propósito. Como texto livre, "motivo" vira
+    "manutenção", "Manutenção", "manut." e "ver uma coisa" — e aí a pergunta
+    "quantas sessões de incidente tivemos no mês?" deixa de ter resposta.
+    O detalhe específico continua existindo em `motivo_detalhe`, que é livre:
+    a categoria serve ao relatório, o detalhe serve à auditoria.
+    """
+
+    MANUTENCAO = "manutencao"
+    INCIDENTE = "incidente"
+    DEPLOY = "deploy"
+    AUDITORIA = "auditoria"
+    SUPORTE = "suporte"
+    OUTRO = "outro"
+
+
 class TipoDeConsumo(StrEnum):
     """O que a sessão usou para autenticar no alvo."""
 
@@ -203,6 +221,12 @@ class Sessao:
     tipo: TipoDeSessao
     alvo: str
     motivo: str = ""
+    # Marca que esta instância veio do banco, não de um cadastro novo. Só o
+    # repositório a liga; a API nunca a expõe.
+    legado: bool = False
+    # O que esta sessao teve de particular: ticket, chamado, nome do
+    # incidente. Livre porque e descricao, nao categoria.
+    motivo_detalhe: str = ""
     segredo_path: str | None = None
     estado: EstadoDaSessao = EstadoDaSessao.ATIVA
     eventos: list[EventoDeSessao] = field(default_factory=list)
@@ -223,6 +247,28 @@ class Sessao:
             raise ValidationError(
                 "A sessão precisa de um alvo. Sessão sem alvo é registro que "
                 "não responde a pergunta nenhuma depois."
+            )
+        # O motivo é obrigatório e vem da lista fechada. Em branco ou livre,
+        # ele deixa de ser mensurável — e "quantas sessões de incidente
+        # tivemos?" é exatamente o tipo de pergunta que a trilha existe para
+        # responder.
+        #
+        # **`legado=True` desliga a checagem da lista, e só ela.** Sessões
+        # gravadas antes de a lista fechar têm motivo livre ("Validacao",
+        # "Conferencia do fechamento"), e recusá-las na LEITURA não conserta
+        # o passado: derruba a listagem inteira por causa de um registro
+        # antigo, escondendo também os corretos. Fato consumado precisa ser
+        # legível; o que entra agora passa pela lista.
+        if not self.motivo.strip():
+            raise ValidationError(
+                "Informe o motivo da sessão. Sem ele não há como medir por "
+                "que as pessoas entram nas máquinas."
+            )
+        if not self.legado and self.motivo not in {m.value for m in MotivoDaSessao}:
+            permitidos = ", ".join(m.value for m in MotivoDaSessao)
+            raise ValidationError(
+                f"Motivo {self.motivo!r} não é uma opção. Escolha entre: "
+                f"{permitidos}."
             )
         # O IP solto continua existindo para compatibilidade; se veio só ele,
         # a origem herda — senão a tela mostraria "não identificada" tendo o

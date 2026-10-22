@@ -28,7 +28,7 @@ SENHA_REAL = "senha-root-que-nao-pode-vazar-8812"
 
 
 def _abrir(client: TestClient, headers: dict[str, str], **extra):  # noqa: ANN003
-    corpo = {"tipo": "ssh", "alvo": "srv-contabil", "motivo": "Manutenção", **extra}
+    corpo = {"tipo": "ssh", "alvo": "srv-contabil", "motivo": "manutencao", **extra}
     return client.post("/api/v1/sessoes", headers=headers, json=corpo)
 
 
@@ -80,7 +80,12 @@ class TestOrigemDaSessao:
         resposta = client.post(
             "/api/v1/sessoes",
             headers={**autenticado, "User-Agent": "VaultCliente/1.2"},
-            json={"tipo": "ssh", "alvo": "srv", "origem_hostname": "PC-01"},
+            json={
+                "tipo": "ssh",
+                "alvo": "srv",
+                "motivo": "manutencao",
+                "origem_hostname": "PC-01",
+            },
         )
 
         assert resposta.json()["origem"]["user_agent"] == "VaultCliente/1.2"

@@ -31,8 +31,11 @@ from ...domain.shared.errors import (
     DomainError,
     NotFoundError,
     PermissionDeniedError,
+    ValidationError,
 )
 from ...domain.shared.value_objects import PolicyPath, Slug
+from ...domain.vaults.entities import Secret, SecretKind
+from ...infrastructure.crypto.envelope import EnvelopeCryptoService
 from ...infrastructure.db.repositories import (
     AuditRepository,
     ConfiguracaoRepository,
@@ -40,8 +43,19 @@ from ...infrastructure.db.repositories import (
     CredentialRepository,
     DeviceRepository,
     PolicyRepository,
+    SecretRepository,
+    VaultRepository,
 )
-from ..deps import CurrentUser, get_audit, get_current_user, get_db, get_policies
+from ..deps import (
+    CurrentUser,
+    get_audit,
+    get_crypto,
+    get_current_user,
+    get_db,
+    get_policies,
+    get_secrets,
+    get_vaults,
+)
 
 router = APIRouter(tags=["Inventário"])
 
@@ -178,6 +192,32 @@ class CertificadoResponse(BaseModel):
     description: str
     estado: str
     dias_restantes: int
+    # **Se há arquivo guardado, nunca o arquivo.** A tela precisa saber se
+    # oferece "baixar" ou "enviar"; o conteúdo exige a rota própria, que
+    # audita cada download.
+    tem_arquivo: bool
+    arquivo_nome: str
+    arquivo_cofre: str
+
+
+class GuardarArquivoRequest(BaseModel):
+    """O arquivo do certificado, para guardar cifrado no cofre.
+
+    Vem em **base64** e não como `multipart`: o conteúdo vira segredo
+    versionado como qualquer outro, e o caminho de cifragem é o mesmo de uma
+    senha. Um `multipart` exigiria um segundo caminho de escrita para o mesmo
+    destino — e dois caminhos divergem.
+    """
+
+    cofre: str = Field(min_length=1, max_length=64)
+    arquivo_nome: str = Field(min_length=1, max_length=255)
+    # 2 MiB de base64 ≈ 1,5 MiB de arquivo. Um .pfx típico tem alguns KiB;
+    # um limite generoso aqui ainda recusa o upload que entrou por engano.
+    conteudo_base64: str = Field(min_length=1, max_length=2_800_000)
+    # A senha do .pfx, quando houver, NÃO vem aqui: ela é outro segredo, com
+    # outra revelação e outra auditoria. Guardá-la junto do arquivo faria do
+    # par "arquivo + senha" um único clique — que é exatamente o que a
+    # separação existe para impedir.
 
 
 class CriarCertificadoRequest(BaseModel):
@@ -754,6 +794,150 @@ def exportar_certificado(
     }
 
 
+@router.post(
+    "/certificados/{nome}/arquivo",
+    response_model=CertificadoResponse,
+    summary="Guardar o arquivo do certificado",
+)
+def guardar_arquivo(
+    nome: str,
+    payload: GuardarArquivoRequest,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    certificates: Annotated[CertificateRepository, Depends(get_certificates)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    crypto: Annotated[EnvelopeCryptoService, Depends(get_crypto)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CertificadoResponse:
+    """Guarda o arquivo do certificado como segredo cifrado no cofre.
+
+    **Duas permissões, não uma.** Exige `UPDATE` no certificado *e* `CREATE`
+    no cofre de destino. Checar só a primeira deixaria quem administra
+    certificados escrever em qualquer cofre por esta porta — uma escalada
+    silenciosa, porque a tela de certificados não parece uma tela de cofre.
+
+    **O arquivo vira segredo versionado.** Reenviar não sobrescreve: grava
+    outra versão. Certificado renovado mantém o histórico do anterior, que é
+    o que responde "com qual arquivo aquilo foi assinado em março?".
+    """
+    import base64
+    import binascii
+
+    certificado = certificates.get_by_name(Slug(nome))
+    _exigir(
+        current, policies, audit, db, certificado.path, Capability.UPDATE,
+        "Sem permissão para alterar este certificado.",
+    )
+
+    try:
+        conteudo = base64.b64decode(payload.conteudo_base64, validate=True)
+    except (binascii.Error, ValueError) as erro:
+        raise ValidationError("O arquivo não chegou em base64 válido.") from erro
+    if not conteudo:
+        raise ValidationError("O arquivo chegou vazio.")
+
+    cofre = vaults.get_by_name(Slug(payload.cofre))
+    nome_do_segredo = Slug(f"certificado-{certificado.name}")
+    caminho = cofre.secret_path(nome_do_segredo)
+    _exigir(
+        current, policies, audit, db, caminho, Capability.CREATE,
+        "Sem permissão para guardar segredos neste cofre.",
+    )
+    cofre.ensure_usable()
+
+    # Reenvio vira nova versão do mesmo segredo; o histórico é o que permite
+    # responder com qual arquivo algo foi assinado numa data passada.
+    valor = crypto.encrypt(base64.b64encode(conteudo).decode("ascii"))
+    try:
+        segredo = secrets.get_in_vault(cofre.id, nome_do_segredo)
+    except NotFoundError:
+        segredo = Secret(
+            name=nome_do_segredo,
+            vault_id=cofre.id,
+            kind=SecretKind.CERTIFICATE,
+            description=f"Arquivo de {certificado.display_name}.",
+        )
+        segredo.add_version(valor, created_by=current.id)
+        secrets.add(segredo)
+    else:
+        versao = segredo.add_version(valor, created_by=current.id)
+        secrets.add_version(segredo.id, versao)
+
+    certificado.secret_id = segredo.id
+    certificado.arquivo_nome = payload.arquivo_nome
+    certificado.arquivo_cofre = str(cofre.name)
+    salvo = certificates.save(certificado)
+
+    audit.append(
+        _evento(
+            current, AuditAction.CERTIFICATE_FILE_STORED, str(certificado.path),
+            reason=(
+                f"Arquivo {payload.arquivo_nome} ({len(conteudo)} bytes) "
+                f"guardado em {caminho}."
+            ),
+        )
+    )
+    alerta = ConfiguracaoRepository(db).atual().alerta_certificado_dias
+    return _certificado_response(salvo, alerta)
+
+
+@router.get(
+    "/certificados/{nome}/arquivo",
+    summary="Baixar o arquivo do certificado",
+)
+def baixar_arquivo(
+    nome: str,
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    certificates: Annotated[CertificateRepository, Depends(get_certificates)],
+    vaults: Annotated[VaultRepository, Depends(get_vaults)],
+    secrets: Annotated[SecretRepository, Depends(get_secrets)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    audit: Annotated[AuditRepository, Depends(get_audit)],
+    crypto: Annotated[EnvelopeCryptoService, Depends(get_crypto)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Devolve o arquivo guardado, em base64.
+
+    **Exige `REVEAL` no cofre**, não `READ` no certificado. Acompanhar
+    vencimento e sacar o arquivo são coisas diferentes: a primeira é rotina
+    de quem administra prazos, a segunda entrega material criptográfico. Um
+    `.pfx` carrega a chave privada — é a assinatura da empresa, não um anexo.
+
+    Cada download vira evento, como qualquer revelação.
+    """
+    certificado = certificates.get_by_name(Slug(nome))
+    _exigir(
+        current, policies, audit, db, certificado.path, Capability.READ,
+        "Sem permissão para ver este certificado.",
+    )
+    if not certificado.secret_id or not certificado.arquivo_cofre:
+        raise NotFoundError("Este certificado não tem arquivo guardado.")
+
+    cofre = vaults.get_by_name(Slug(certificado.arquivo_cofre))
+    segredo = secrets.get(certificado.secret_id)
+    _exigir(
+        current, policies, audit, db, cofre.secret_path(segredo.name),
+        Capability.REVEAL,
+        "Sem permissão para revelar o arquivo deste certificado.",
+    )
+    cofre.ensure_usable()
+
+    audit.append(
+        _evento(
+            current, AuditAction.CERTIFICATE_FILE_DOWNLOADED,
+            str(certificado.path),
+            reason=f"Arquivo {certificado.arquivo_nome} baixado.",
+        )
+    )
+    return {
+        "arquivo_nome": certificado.arquivo_nome,
+        "conteudo_base64": crypto.decrypt(segredo.current_version.value),
+        "versao": segredo.current_version.version,
+    }
+
+
 @router.delete(
     "/certificados/{nome}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -954,6 +1138,9 @@ def _certificado_response(
         description=certificado.description,
         estado=estado,
         dias_restantes=certificado.days_remaining(),
+        tem_arquivo=bool(certificado.secret_id and certificado.arquivo_cofre),
+        arquivo_nome=certificado.arquivo_nome,
+        arquivo_cofre=certificado.arquivo_cofre,
     )
 
 

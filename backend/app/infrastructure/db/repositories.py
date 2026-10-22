@@ -26,6 +26,7 @@ from ...domain.apikeys.entities import (
     ChaveDeApi,
     EstadoDaChave,
     FormatoDaChave,
+    MetodoHttp,
 )
 from ...domain.approvals.entities import AccessRequest, RequestStatus
 from ...domain.machines.entities import (
@@ -928,10 +929,35 @@ class CertificateRepository:
                 not_before=certificate.not_before,
                 not_after=certificate.not_after,
                 secret_id=certificate.secret_id,
+                arquivo_nome=certificate.arquivo_nome,
+                arquivo_cofre=certificate.arquivo_cofre,
                 description=certificate.description,
                 created_at=certificate.created_at,
             )
         )
+        self._session.flush()
+        return certificate
+
+    def save(self, certificate: Certificate) -> Certificate:
+        """Grava as alterações de um certificado que já existe.
+
+        O nome não muda: é o identificador no caminho de política, e
+        renomeá-lo mudaria quem tem permissão sobre ele sem ninguém pedir.
+        """
+        model = self._session.get(CertificateModel, certificate.id)
+        if model is None:
+            raise NotFoundError("Certificado nao encontrado.")
+        model.display_name = certificate.display_name
+        model.subject = certificate.subject
+        model.issuer = certificate.issuer
+        model.serial = certificate.serial
+        model.owner_label = certificate.owner_label
+        model.not_before = certificate.not_before
+        model.not_after = certificate.not_after
+        model.secret_id = certificate.secret_id
+        model.arquivo_nome = certificate.arquivo_nome
+        model.arquivo_cofre = certificate.arquivo_cofre
+        model.description = certificate.description
         self._session.flush()
         return certificate
 
@@ -1046,6 +1072,8 @@ def _to_certificate(model: CertificateModel) -> Certificate:
         owner_label=model.owner_label,
         serial=model.serial,
         secret_id=model.secret_id,
+        arquivo_nome=model.arquivo_nome or "",
+        arquivo_cofre=model.arquivo_cofre or "",
         description=model.description,
         created_at=_aware(model.created_at),
         id=model.id,
@@ -1524,6 +1552,7 @@ class SessaoRepository:
                 tipo=str(sessao.tipo),
                 alvo=sessao.alvo,
                 motivo=sessao.motivo,
+                motivo_detalhe=sessao.motivo_detalhe,
                 segredo_path=sessao.segredo_path,
                 estado=str(sessao.estado),
                 capturado_por=capturado_por,
@@ -1677,6 +1706,11 @@ def _to_sessao(model: SessaoModel) -> Sessao:
         tipo=TipoDeSessao(model.tipo),
         alvo=model.alvo,
         motivo=model.motivo,
+        # Leitura do banco: aceita o motivo como foi gravado. Sessoes
+        # anteriores a lista fechada tem motivo livre, e recusa-las aqui
+        # derrubaria a listagem inteira por causa de registro antigo.
+        legado=True,
+        motivo_detalhe=model.motivo_detalhe,
         segredo_path=model.segredo_path,
         estado=EstadoDaSessao(model.estado),
         eventos=[
@@ -1859,6 +1893,9 @@ class ChaveApiRepository:
                 usada_em=list(chave.usada_em),
                 responsavel=chave.responsavel,
                 documentacao_url=chave.documentacao_url,
+                url_base=chave.url_base,
+                metodo=str(chave.metodo),
+                rota_exemplo=chave.rota_exemplo,
                 secret_id=chave.secret_id,
                 vault_name=chave.vault_name,
                 secret_name=chave.secret_name,
@@ -1901,6 +1938,9 @@ class ChaveApiRepository:
         model.usada_em = list(chave.usada_em)
         model.responsavel = chave.responsavel
         model.documentacao_url = chave.documentacao_url
+        model.url_base = chave.url_base
+        model.metodo = str(chave.metodo)
+        model.rota_exemplo = chave.rota_exemplo
         model.expira_em = chave.expira_em
         model.estado = str(chave.estado)
         model.revogada_em = chave.revogada_em
@@ -1930,6 +1970,9 @@ def _to_chave_api(model: ChaveApiModel) -> ChaveDeApi:
         usada_em=list(model.usada_em or []),
         responsavel=model.responsavel,
         documentacao_url=model.documentacao_url,
+        url_base=model.url_base or "",
+        metodo=MetodoHttp(model.metodo or "GET"),
+        rota_exemplo=model.rota_exemplo or "",
         secret_id=model.secret_id,
         vault_name=model.vault_name,
         secret_name=model.secret_name,

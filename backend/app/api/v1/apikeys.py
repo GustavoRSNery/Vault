@@ -25,6 +25,7 @@ from ...domain.apikeys.entities import (
     ChaveDeApi,
     EstadoDaChave,
     FormatoDaChave,
+    MetodoHttp,
     expirar_vencidas,
 )
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
@@ -61,6 +62,9 @@ class ChaveResponse(BaseModel):
     usada_em: list[str]
     responsavel: str
     documentacao_url: str
+    url_base: str
+    metodo: str
+    rota_exemplo: str
     vault_name: str
     secret_name: str
     expira_em: datetime | None
@@ -68,6 +72,11 @@ class ChaveResponse(BaseModel):
     situacao: str
     vencendo: bool
     como_usar: str
+    # A requisição montada, em pares (rótulo, valor), e o mesmo exemplo como
+    # `curl`. Montados no servidor: deixar a tela concatenar espalharia a
+    # regra, e cada tela erraria a seu modo — a mesma razão do comando SSH.
+    requisicao_exemplo: list[tuple[str, str]]
+    curl_exemplo: str
     criado_por: str
     created_at: datetime
 
@@ -83,6 +92,11 @@ class CriarChaveRequest(BaseModel):
     escopo: str = Field(default="", max_length=2000)
     usada_em: list[str] = Field(default_factory=list)
     documentacao_url: str = Field(default="", max_length=500)
+    # Endereço e rota de exemplo. Opcionais: nem todo serviço tem uma rota
+    # única que sirva de exemplo, e exigir inventaria endereço falso.
+    url_base: str = Field(default="", max_length=500)
+    metodo: MetodoHttp = MetodoHttp.GET
+    rota_exemplo: str = Field(default="", max_length=300)
     # Onde o valor está guardado. Opcional: dá para cadastrar o governo antes
     # de ter a chave em mãos, que é o caso de quem ainda vai solicitá-la.
     vault_name: str = Field(default="", max_length=64)
@@ -102,6 +116,9 @@ class AtualizarChaveRequest(BaseModel):
     escopo: str | None = Field(default=None, max_length=2000)
     usada_em: list[str] | None = None
     documentacao_url: str | None = Field(default=None, max_length=500)
+    url_base: str | None = Field(default=None, max_length=500)
+    metodo: MetodoHttp | None = None
+    rota_exemplo: str | None = Field(default=None, max_length=300)
     vault_name: str | None = Field(default=None, max_length=64)
     secret_name: str | None = Field(default=None, max_length=64)
     # `None` aqui significa "sem vencimento", um valor legítimo e diferente
@@ -210,6 +227,9 @@ def criar(
         usada_em=payload.usada_em,
         responsavel=payload.responsavel,
         documentacao_url=payload.documentacao_url,
+        url_base=payload.url_base,
+        metodo=payload.metodo,
+        rota_exemplo=payload.rota_exemplo,
         vault_name=payload.vault_name,
         secret_name=payload.secret_name,
         expira_em=expira,
@@ -373,6 +393,9 @@ def _resposta(chave: ChaveDeApi, alerta_dias: int) -> ChaveResponse:
         usada_em=chave.usada_em,
         responsavel=chave.responsavel,
         documentacao_url=chave.documentacao_url,
+        url_base=chave.url_base,
+        metodo=str(chave.metodo),
+        rota_exemplo=chave.rota_exemplo,
         vault_name=chave.vault_name,
         secret_name=chave.secret_name,
         expira_em=chave.expira_em,
@@ -380,6 +403,8 @@ def _resposta(chave: ChaveDeApi, alerta_dias: int) -> ChaveResponse:
         situacao=str(chave.situacao()),
         vencendo=chave.vencendo(alerta_dias),
         como_usar=chave.como_usar(),
+        requisicao_exemplo=chave.requisicao_exemplo(),
+        curl_exemplo=chave.curl_exemplo(),
         criado_por=chave.criado_por,
         created_at=chave.created_at,
     )

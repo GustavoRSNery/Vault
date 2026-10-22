@@ -70,7 +70,7 @@ def _abrir(client: TestClient, headers: dict[str, str], alvo: str = "srv-produca
     resposta = client.post(
         "/api/v1/sessoes",
         headers=headers,
-        json={"tipo": "ssh", "alvo": alvo, "motivo": "Manutenção programada"},
+        json={"tipo": "ssh", "alvo": alvo, "motivo": "manutencao", "motivo_detalhe": "Manutenção programada"},
     )
     assert resposta.status_code == 201, resposta.text
     return resposta.json()["id"]
@@ -470,3 +470,96 @@ class TestHonestidadeDaCaptura:
         self, gravacoes: ArmazenamentoLocal
     ) -> None:
         assert gravacoes.imutavel is False
+
+
+class TestQuemEstaAcessando:
+    """O nome de quem está na máquina.
+
+    A tela de sessões ativas responde "quem está dentro de qual máquina
+    agora". O e-mail responde *qual conta*, que não é a mesma pergunta:
+    numa lista de sessões alheias, `a.souza@` e `a.santos@` se confundem
+    onde "Ana Souza" e "Ana Santos" não se confundiriam.
+    """
+
+    def test_sessao_traz_o_nome_de_quem_abriu(
+        self, client_gravando: TestClient, autenticado: dict[str, str]
+    ) -> None:
+        _abrir(client_gravando, autenticado)
+
+        ativas = client_gravando.get("/api/v1/sessoes", headers=autenticado).json()
+
+        assert len(ativas) == 1
+        assert ativas[0]["usuario_nome"] == "Ana Souza"
+        # O e-mail continua: é ele que identifica a conta sem ambiguidade
+        # quando dois homônimos existem.
+        assert ativas[0]["usuario_label"] == "ana.souza@exemplo.com.br"
+
+    def test_nome_distingue_duas_pessoas_na_mesma_lista(
+        self,
+        client_gravando: TestClient,
+        autenticado: dict[str, str],
+        db_session: Session,
+        usuario: UserModel,
+    ) -> None:
+        """Duas sessões, dois nomes — cada um no seu registro.
+
+        Um teste com uma pessoa só passaria mesmo se a rota devolvesse o
+        nome de quem consulta em todas as linhas, que é justamente o erro
+        que apagaria a distinção numa tela de sessões alheias.
+        """
+        conceder(db_session, usuario, "sessoes", TODAS)
+        ana = _ana(db_session)
+        headers_ana = _login(client_gravando, ANA_EMAIL, ANA_SENHA)
+
+        _abrir(client_gravando, autenticado, alvo="srv-web")
+        _abrir(client_gravando, headers_ana, alvo="srv-db")
+
+        ativas = client_gravando.get("/api/v1/sessoes", headers=autenticado).json()
+
+        por_alvo = {s["alvo"]: s for s in ativas}
+        assert por_alvo["srv-web"]["usuario_nome"] == "Ana Souza"
+        assert por_alvo["srv-db"]["usuario_nome"] == ana.full_name == "Ana"
+        assert por_alvo["srv-db"]["minha"] is False
+
+    def test_historico_tambem_traz_o_nome(
+        self, client_gravando: TestClient, autenticado: dict[str, str]
+    ) -> None:
+        """A mesma coluna "Quem" aparece em Gravações.
+
+        Um campo que só vem preenchido numa das rotas é pior que não
+        existir: a tela mostra o nome numa lista e o e-mail na outra, para a
+        mesma pessoa.
+        """
+        sessao_id = _abrir(client_gravando, autenticado)
+        client_gravando.post(
+            f"/api/v1/sessoes/{sessao_id}/encerrar",
+            headers=autenticado,
+            json={"motivo": "fim"},
+        )
+
+        historico = client_gravando.get(
+            "/api/v1/sessoes/gravacoes", headers=autenticado
+        ).json()
+
+        assert [s["usuario_nome"] for s in historico] == ["Ana Souza"]
+
+    def test_detalhe_tambem_traz_o_nome(
+        self, client_gravando: TestClient, autenticado: dict[str, str]
+    ) -> None:
+        sessao_id = _abrir(client_gravando, autenticado)
+        detalhe = client_gravando.get(
+            f"/api/v1/sessoes/{sessao_id}", headers=autenticado
+        ).json()
+        assert detalhe["usuario_nome"] == "Ana Souza"
+
+    def test_abrir_ja_devolve_o_nome(
+        self, client_gravando: TestClient, autenticado: dict[str, str]
+    ) -> None:
+        """Quem abre recebe a sessão pronta, sem precisar reconsultar."""
+        resposta = client_gravando.post(
+            "/api/v1/sessoes",
+            headers=autenticado,
+            json={"tipo": "ssh", "alvo": "srv-x", "motivo": "manutencao"},
+        )
+        assert resposta.status_code == 201, resposta.text
+        assert resposta.json()["usuario_nome"] == "Ana Souza"

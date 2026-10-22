@@ -104,6 +104,8 @@ class AuditAction(StrEnum):
     REMOTE_ACCESS_STARTED = "acesso_remoto_iniciado"
     CERTIFICATE_EXPORTED = "certificado_exportado"
     CERTIFICATE_DELETED = "certificado_excluido"
+    CERTIFICATE_FILE_STORED = "certificado_arquivo_guardado"
+    CERTIFICATE_FILE_DOWNLOADED = "certificado_arquivo_baixado"
     CREDENTIAL_EXPORTED = "credencial_exportada"
 
 

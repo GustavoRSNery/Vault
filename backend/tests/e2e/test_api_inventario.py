@@ -479,3 +479,270 @@ class TestCertificados:
 
         assert client.get("/api/v1/certificados", headers=autenticado).status_code == 200
         assert client.get("/api/v1/cofres", headers=autenticado).json() == []
+
+
+class TestArquivoDoCertificado:
+    """O arquivo do certificado, cifrado no cofre.
+
+    O que se protege aqui:
+
+    1. **Duas permissões, não uma.** Guardar exige mexer no certificado *e*
+       escrever no cofre. Só a primeira deixaria quem administra prazos
+       escrever em qualquer cofre por esta porta — uma escalada silenciosa,
+       porque ninguém procuraria por ali.
+    2. **Baixar exige REVEAL.** Acompanhar vencimento é rotina de quem cuida
+       de prazos; sacar um `.pfx` entrega a chave privada da empresa.
+    3. **Reenviar versiona**, não sobrescreve: é o que responde "com qual
+       arquivo isso foi assinado em março?".
+    4. **O conteúdo nunca aparece na listagem.**
+    """
+
+    CONTEUDO = b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+
+    def _criar_cert(
+        self, client: TestClient, headers: dict[str, str], nome: str = "portal"
+    ):
+        agora = datetime.now(UTC)
+        return client.post(
+            "/api/v1/certificados",
+            headers=headers,
+            json={
+                "name": nome,
+                "display_name": nome + ".exemplo.com.br",
+                "subject": "CN=" + nome + ".exemplo.com.br",
+                "issuer": "Autoridade Interna",
+                "not_before": (agora - timedelta(days=10)).isoformat(),
+                "not_after": (agora + timedelta(days=100)).isoformat(),
+            },
+        )
+
+    def _cofre(self, client: TestClient, headers: dict[str, str]) -> None:
+        client.post(
+            "/api/v1/cofres",
+            headers=headers,
+            json={"name": "infra", "display_name": "Infra"},
+        )
+
+    def _permitir_tudo(self, db_session: Session, usuario: UserModel) -> None:
+        conceder(db_session, usuario, "certificados/*", GESTAO)
+        conceder(
+            db_session, usuario, "cofres/*", ["read", "list", "create", "update", "reveal"],
+            nome_politica="pol-cofres",
+        )
+
+    def _enviar(self, client, headers, nome="portal", conteudo=None):
+        import base64
+
+        bruto = conteudo if conteudo is not None else self.CONTEUDO
+        return client.post(
+            "/api/v1/certificados/" + nome + "/arquivo",
+            headers=headers,
+            json={
+                "cofre": "infra",
+                "arquivo_nome": nome + ".pem",
+                "conteudo_base64": base64.b64encode(bruto).decode(),
+            },
+        )
+
+    def test_guarda_e_devolve_o_arquivo(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        import base64
+
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+
+        guardado = self._enviar(client, autenticado)
+        assert guardado.status_code == 200, guardado.text
+        assert guardado.json()["tem_arquivo"] is True
+        assert guardado.json()["arquivo_nome"] == "portal.pem"
+
+        baixado = client.get(
+            "/api/v1/certificados/portal/arquivo", headers=autenticado
+        )
+        assert baixado.status_code == 200, baixado.text
+        assert base64.b64decode(baixado.json()["conteudo_base64"]) == self.CONTEUDO
+
+    def test_sem_permissao_no_cofre_nao_guarda(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """Administrar certificado não dá escrita em cofre nenhum.
+
+        O cofre é criado por quem **pode**, e só depois a segunda pessoa —
+        que administra certificados e nada mais — tenta gravar nele. Assim o
+        403 só pode vir da permissão: se o cofre não existisse, um 404
+        faria o teste passar sem provar nada.
+        """
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+
+        outro = _segundo_usuario(db_session)
+        conceder(
+            db_session, outro, "certificados/*", GESTAO,
+            nome_politica="pol-cert-so",
+        )
+        headers = _login(client, OUTRO_EMAIL, OUTRA_SENHA)
+
+        # Enxerga o certificado — é dele que ela cuida.
+        assert (
+            client.get("/api/v1/certificados/portal/arquivo", headers=headers)
+            .status_code
+            in (403, 404)
+        )
+
+        resposta = self._enviar(client, headers)
+        # 404 e não 403 é legítimo aqui: o cofre não revela a própria
+        # existência a quem não o enxerga. Exigir 403 seria exigir o
+        # vazamento. O que importa é o efeito, verificado abaixo.
+        assert resposta.status_code in (403, 404), resposta.text
+
+        # **A prova:** nada foi gravado. Quem pode ver continua sem arquivo.
+        depois = client.get(
+            "/api/v1/certificados/portal", headers=autenticado
+        )
+        if depois.status_code == 200:
+            assert depois.json()["tem_arquivo"] is False
+        lista = client.get("/api/v1/certificados", headers=autenticado).json()
+        portal = next(c for c in lista if c["name"] == "portal")
+        assert portal["tem_arquivo"] is False
+
+    def test_quem_so_le_certificado_nao_anexa_arquivo(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """Anexar é alterar. Leitura não dá escrita.
+
+        Sem esta checagem, qualquer pessoa com leitura de certificados
+        poderia **trocar** o arquivo que os outros baixam — e o estrago não
+        apareceria até alguém usar o arquivo errado para assinar.
+        """
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+
+        outro = _segundo_usuario(db_session)
+        # Lê certificados; escreve no cofre. Falta só o UPDATE no certificado.
+        conceder(
+            db_session, outro, "certificados/*", ["read", "list"],
+            nome_politica="pol-cert-leitura",
+        )
+        conceder(
+            db_session, outro, "cofres/*", ["read", "list", "create", "update", "reveal"],
+            nome_politica="pol-cofre-outro",
+        )
+        headers = _login(client, OUTRO_EMAIL, OUTRA_SENHA)
+
+        resposta = self._enviar(client, headers)
+        assert resposta.status_code == 403, resposta.text
+
+        lista = client.get("/api/v1/certificados", headers=autenticado).json()
+        portal = next(c for c in lista if c["name"] == "portal")
+        assert portal["tem_arquivo"] is False
+
+    def test_baixar_exige_reveal_e_nao_so_leitura(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """Ver que existe arquivo não é o mesmo que poder sacá-lo."""
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+        assert self._enviar(client, autenticado).status_code == 200
+
+        outro = _segundo_usuario(db_session)
+        conceder(
+            db_session, outro, "certificados/*", ["read", "list"],
+            nome_politica="pol-cert-outro",
+        )
+        conceder(
+            db_session, outro, "cofres/*", ["read", "list"],
+            nome_politica="pol-cofre-outro",
+        )
+        headers = _login(client, OUTRO_EMAIL, OUTRA_SENHA)
+
+        assert client.get("/api/v1/certificados", headers=headers).status_code == 200
+        negado = client.get(
+            "/api/v1/certificados/portal/arquivo", headers=headers
+        )
+        assert negado.status_code == 403, negado.text
+
+    def test_reenviar_cria_nova_versao(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        import base64
+
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+
+        self._enviar(client, autenticado)
+        renovado = b"-----BEGIN CERTIFICATE-----\nRENOVADO\n-----END CERTIFICATE-----\n"
+        self._enviar(client, autenticado, conteudo=renovado)
+
+        baixado = client.get(
+            "/api/v1/certificados/portal/arquivo", headers=autenticado
+        ).json()
+        assert baixado["versao"] == 2
+        assert base64.b64decode(baixado["conteudo_base64"]) == renovado
+
+    def test_listagem_nunca_traz_o_conteudo(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+        self._enviar(client, autenticado)
+
+        bruto = client.get("/api/v1/certificados", headers=autenticado).text
+        assert "BEGIN CERTIFICATE" not in bruto
+        assert "conteudo_base64" not in bruto
+
+    def test_sem_arquivo_guardado_da_404(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        conceder(db_session, usuario, "certificados/*", GESTAO)
+        self._criar_cert(client, autenticado)
+        resposta = client.get(
+            "/api/v1/certificados/portal/arquivo", headers=autenticado
+        )
+        assert resposta.status_code == 404
+
+    def test_base64_invalido_e_recusado(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+
+        resposta = client.post(
+            "/api/v1/certificados/portal/arquivo",
+            headers=autenticado,
+            json={
+                "cofre": "infra",
+                "arquivo_nome": "x.pem",
+                "conteudo_base64": "isto nao e base64!!!",
+            },
+        )
+        assert resposta.status_code == 422, resposta.text
+
+    def test_guardar_e_baixar_viram_evento(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        self._permitir_tudo(db_session, usuario)
+        self._cofre(client, autenticado)
+        self._criar_cert(client, autenticado)
+        self._enviar(client, autenticado)
+        client.get("/api/v1/certificados/portal/arquivo", headers=autenticado)
+
+        acoes = db_session.scalars(select(AuditEventModel.action)).all()
+        assert "certificado_arquivo_guardado" in acoes
+        assert "certificado_arquivo_baixado" in acoes

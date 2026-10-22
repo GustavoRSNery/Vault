@@ -1,9 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
-import { Alerta, Badge, Botao, Campo, Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
+import { Alerta, Badge, Botao, Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
 import { baixarJson } from '@/shared/lib/baixar'
+import { NovoCertificado } from './NovoCertificado'
+import { TerminalCertificado } from './TerminalCertificado'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 
 type Certificado = {
   id: string
@@ -18,6 +22,9 @@ type Certificado = {
   description: string
   estado: string
   dias_restantes: number
+  tem_arquivo: boolean
+  arquivo_nome: string
+  arquivo_cofre: string
 }
 
 /**
@@ -36,6 +43,7 @@ const FAIXAS = [
 
 export function CertificadosPage() {
   const [criando, setCriando] = useState(false)
+  const tour = useTour('certificados')
   const queryClient = useQueryClient()
 
   const { data: certificados, isLoading, error } = useQuery({
@@ -64,6 +72,8 @@ export function CertificadosPage() {
 
   return (
     <>
+      <Tour id="certificados" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
         <div className="row between wrap">
           <div>
@@ -74,9 +84,36 @@ export function CertificadosPage() {
               quando guardada, vive cifrada no cofre.
             </p>
           </div>
-          <Botao pequeno onClick={() => setCriando(true)}>
-            Novo certificado
-          </Botao>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Certificados"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/certificados',
+                  descricao:
+                    'Ordenados pelo que vence primeiro. Traz titular, emissor, serial, validade e se há arquivo guardado — nunca o arquivo.',
+                  exemplo:
+                    '[{"name":"portal","estado":"vencendo","dias_restantes":17,"tem_arquivo":true}]',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/certificados/{nome}/exportar',
+                  descricao:
+                    'Os metadados de um certificado em JSON, para alimentar um monitoramento externo de vencimento.',
+                },
+              ]}
+              observacao="Baixar o arquivo é outra rota e exige permissão de revelar no cofre: um .pfx carrega a chave privada."
+            />
+            <Botao
+              pequeno
+              data-tour="novo-certificado"
+              onClick={() => setCriando(true)}
+            >
+              Novo certificado
+            </Botao>
+          </div>
         </div>
       </header>
 
@@ -104,7 +141,7 @@ export function CertificadosPage() {
         30 e em 60.
       </p>
 
-      <div className="cards">
+      <div className="cards" data-tour="faixas">
         {FAIXAS.map((faixa) => (
           <CardMetrica
             key={faixa.rotulo}
@@ -208,7 +245,12 @@ function LinhaCertificado({
         </td>
         <td>
           <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-            <Botao pequeno variante="secondary" onClick={() => setAberto(!aberto)}>
+            <Botao
+              pequeno
+              variante="secondary"
+              data-tour="ver-certificado"
+              onClick={() => setAberto(!aberto)}
+            >
               {aberto ? 'Fechar' : 'Ver'}
             </Botao>
             <Botao
@@ -252,11 +294,25 @@ function LinhaCertificado({
                   {certificado.description && (
                     <Detalhe rotulo="Observação" valor={certificado.description} />
                   )}
+                  {certificado.tem_arquivo && (
+                    <Detalhe
+                      rotulo="Arquivo"
+                      valor={`${certificado.arquivo_nome} — cofre ${certificado.arquivo_cofre}`}
+                    />
+                  )}
                   <span className="help">
                     A chave privada, quando guardada, vive cifrada no cofre e não
                     aparece aqui nem na exportação.
                   </span>
                 </div>
+              )}
+
+              {aberto && (
+                <TerminalCertificado
+                  nomeDoCertificado={certificado.name}
+                  arquivoNome={certificado.arquivo_nome}
+                  temArquivo={certificado.tem_arquivo}
+                />
               )}
 
               {confirmando && (
@@ -336,109 +392,5 @@ function EstadoCertificado({ certificado }: { certificado: Certificado }) {
         {certificado.dias_restantes} dias restantes
       </span>
     </div>
-  )
-}
-
-function NovoCertificado({
-  aoFechar,
-  aoCriar,
-}: {
-  aoFechar: () => void
-  aoCriar: () => void
-}) {
-  const [nome, setNome] = useState('')
-  const [titular, setTitular] = useState('')
-  const [emissor, setEmissor] = useState('')
-  const [responsavel, setResponsavel] = useState('')
-  const [inicio, setInicio] = useState('')
-  const [fim, setFim] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-
-  const identificador = nome
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 64)
-
-  const criar = useMutation({
-    mutationFn: () =>
-      request<Certificado>('/certificados', {
-        method: 'POST',
-        body: {
-          name: identificador,
-          display_name: nome,
-          subject: titular || `CN=${nome}`,
-          issuer: emissor,
-          owner_label: responsavel,
-          // O input date devolve só a data; a API espera instante com fuso.
-          not_before: new Date(`${inicio}T00:00:00`).toISOString(),
-          not_after: new Date(`${fim}T23:59:59`).toISOString(),
-        },
-      }),
-    onSuccess: aoCriar,
-    onError: (e) =>
-      setErro(e instanceof ApiError ? e.message : 'Não foi possível cadastrar.'),
-  })
-
-  const invalido =
-    identificador === '' || emissor.trim() === '' || inicio === '' || fim === ''
-
-  return (
-    <Card titulo="Novo certificado">
-      <div className="col" style={{ gap: 14 }}>
-        {erro && <Alerta tom="danger">{erro}</Alerta>}
-
-        <Campo
-          rotulo="Nome"
-          value={nome}
-          onChange={(e) => setNome(e.target.value)}
-          ajuda={
-            identificador ? `Identificador: ${identificador}` : 'Ex.: api.exemplo.com.br.'
-          }
-          autoFocus
-        />
-        <Campo
-          rotulo="Titular (subject)"
-          value={titular}
-          onChange={(e) => setTitular(e.target.value)}
-          ajuda={`Opcional. Em branco, usa CN=${nome || '…'}.`}
-        />
-        <Campo
-          rotulo="Emissor"
-          value={emissor}
-          onChange={(e) => setEmissor(e.target.value)}
-          ajuda="Ex.: Let's Encrypt, DigiCert, AC interna."
-        />
-        <Campo
-          rotulo="Responsável"
-          value={responsavel}
-          onChange={(e) => setResponsavel(e.target.value)}
-          ajuda="Quem renova. Opcional, mas é quem será procurado no vencimento."
-        />
-        <Campo
-          rotulo="Válido de"
-          type="date"
-          value={inicio}
-          onChange={(e) => setInicio(e.target.value)}
-        />
-        <Campo
-          rotulo="Válido até"
-          type="date"
-          value={fim}
-          onChange={(e) => setFim(e.target.value)}
-        />
-
-        <div className="row" style={{ gap: 10 }}>
-          <Botao onClick={() => criar.mutate()} disabled={invalido || criar.isPending}>
-            {criar.isPending ? 'Cadastrando…' : 'Cadastrar'}
-          </Botao>
-          <Botao variante="secondary" onClick={aoFechar}>
-            Cancelar
-          </Botao>
-        </div>
-      </div>
-    </Card>
   )
 }

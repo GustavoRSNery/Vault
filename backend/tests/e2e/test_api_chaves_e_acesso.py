@@ -219,6 +219,156 @@ class TestChavesDeApi:
         assert self._criar(client, autenticado).status_code == 403
 
 
+class TestRequisicaoDeExemplo:
+    """O exemplo pronto, no estilo de um cliente de API.
+
+    Saber que a chave vai em `Authorization: Bearer` não diz **contra o
+    quê**: sem o endereço, quem recebe a chave ainda precisa caçar a
+    documentação para a primeira chamada. Estes testes protegem o exemplo de
+    virar enfeite — um exemplo errado é pior que nenhum, porque ele é colado
+    sem conferência.
+    """
+
+    def _criar(
+        self, client: TestClient, headers: dict[str, str], **extra
+    ):  # noqa: ANN003
+        corpo = {
+            "name": "sefaz-nfe",
+            "display_name": "SEFAZ NF-e",
+            "servico": "SEFAZ",
+            "responsavel": "fiscal@exemplo.com.br",
+            **extra,
+        }
+        return client.post("/api/v1/chaves-api", headers=headers, json=corpo)
+
+    def test_monta_metodo_endereco_e_cabecalho(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        conceder(db_session, usuario, "chaves-api/*", TODAS)
+        chave = self._criar(
+            client, autenticado,
+            url_base="https://api.sefaz.gov.br",
+            metodo="POST",
+            rota_exemplo="/nfe/emitir",
+        ).json()
+
+        pares = dict((r, v) for r, v in chave["requisicao_exemplo"])
+        assert pares["metodo"] == "POST https://api.sefaz.gov.br/nfe/emitir"
+        assert pares["cabecalho"] == "Authorization: Bearer <valor>"
+
+    def test_curl_respeita_o_metodo(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """`curl` sem `-X POST` faz um GET — e o exemplo colado não funciona."""
+        conceder(db_session, usuario, "chaves-api/*", TODAS)
+        post = self._criar(
+            client, autenticado, url_base="https://api.x.com",
+            metodo="POST", rota_exemplo="/v1/cobranca",
+        ).json()
+        assert "-X POST" in post["curl_exemplo"]
+
+        get = self._criar(
+            client, autenticado, name="outra", display_name="Outra",
+            url_base="https://api.x.com", metodo="GET", rota_exemplo="/v1/saldo",
+        ).json()
+        # GET é o padrão do curl: poluir o comando com `-X GET` é ruído.
+        assert "-X" not in get["curl_exemplo"]
+
+    def test_chave_na_query_nao_vai_no_cabecalho(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """Mandar nos dois lugares ensina a chamada errada.
+
+        Quem copia o exemplo passaria a chave duas vezes — e o serviço que
+        recusa cabeçalho desconhecido devolveria erro sem dizer o motivo.
+        """
+        conceder(db_session, usuario, "chaves-api/*", TODAS)
+        chave = self._criar(
+            client, autenticado,
+            formato="query", nome_do_campo="api_key",
+            url_base="https://api.x.com", rota_exemplo="/v1/notas",
+        ).json()
+
+        rotulos = [r for r, _ in chave["requisicao_exemplo"]]
+        assert "cabecalho" not in rotulos
+        assert "api_key=<valor>" in chave["curl_exemplo"]
+        assert "-H" not in chave["curl_exemplo"]
+
+    def test_o_valor_da_chave_nunca_entra_no_exemplo(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """Exemplo com chave de verdade vira chave em print e em chamado."""
+        conceder(db_session, usuario, "chaves-api/*", TODAS)
+        chave = self._criar(
+            client, autenticado, url_base="https://api.x.com",
+            rota_exemplo="/v1/notas",
+        ).json()
+
+        assert "<valor>" in chave["curl_exemplo"]
+        montado = " ".join(v for _, v in chave["requisicao_exemplo"])
+        assert "<valor>" in montado
+
+    def test_url_sem_esquema_e_recusada(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """`api.x.com/v1` não roda em lugar nenhum: curl não adivinha o esquema."""
+        conceder(db_session, usuario, "chaves-api/*", TODAS)
+        resposta = self._criar(client, autenticado, url_base="api.sefaz.gov.br")
+        assert resposta.status_code == 422, resposta.text
+
+    def test_sem_endereco_nao_inventa_exemplo(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """Sem URL, o `curl` sai vazio em vez de meio pronto.
+
+        Um comando com buraco dá a impressão de que falta só preencher — e
+        alguém preenche errado.
+        """
+        conceder(db_session, usuario, "chaves-api/*", TODAS)
+        chave = self._criar(client, autenticado).json()
+
+        assert chave["curl_exemplo"] == ""
+        assert [r for r, _ in chave["requisicao_exemplo"]] == ["cabecalho"]
+
+    def test_atualizar_grava_a_rota(
+        self, client: TestClient, autenticado: dict[str, str],
+        usuario: UserModel, db_session: Session,
+    ) -> None:
+        """O PUT precisa gravar os campos novos.
+
+        Este teste existe por histórico: já aconteceu duas vezes neste
+        projeto de um campo novo ser aceito pelo PUT, devolvido na resposta e
+        **não gravado** — some no próximo GET, sem erro nenhum.
+        """
+        conceder(db_session, usuario, "chaves-api/*", TODAS)
+        self._criar(client, autenticado)
+
+        client.put(
+            "/api/v1/chaves-api/sefaz-nfe",
+            headers=autenticado,
+            json={
+                "url_base": "https://api.sefaz.gov.br",
+                "metodo": "PUT",
+                "rota_exemplo": "/nfe/cancelar",
+            },
+        )
+
+        # Relê do banco: a resposta do PUT pode estar certa e o banco errado.
+        relido = client.get(
+            "/api/v1/chaves-api/sefaz-nfe", headers=autenticado
+        ).json()
+        assert relido["url_base"] == "https://api.sefaz.gov.br"
+        assert relido["metodo"] == "PUT"
+        assert relido["rota_exemplo"] == "/nfe/cancelar"
+        assert "-X PUT" in relido["curl_exemplo"]
+
+
 class TestAcessoRemoto:
     def _dispositivo(self, client: TestClient, headers: dict[str, str]) -> None:
         client.post(

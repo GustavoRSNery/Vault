@@ -48,6 +48,20 @@ class EstadoDaChave(StrEnum):
     EXPIRADA = "expirada"
 
 
+class MetodoHttp(StrEnum):
+    """Verbo da requisição de exemplo.
+
+    Importa no exemplo porque `GET` e `POST` mudam o que a pessoa precisa
+    enviar — e um exemplo que não roda é pior que nenhum.
+    """
+
+    GET = "GET"
+    POST = "POST"
+    PUT = "PUT"
+    PATCH = "PATCH"
+    DELETE = "DELETE"
+
+
 class FormatoDaChave(StrEnum):
     """Como a chave é apresentada ao serviço.
 
@@ -77,6 +91,16 @@ class ChaveDeApi:
     usada_em: list[str] = field(default_factory=list)
     responsavel: str = ""
     documentacao_url: str = ""
+    # **Endereço e rota de exemplo.** Saber que a chave vai em
+    # `Authorization: Bearer` não diz *contra o quê*: sem a URL, quem pega a
+    # chave ainda precisa caçar a documentação para a primeira chamada. Com
+    # ela, a tela monta uma requisição copiável.
+    #
+    # Opcionais de propósito: nem todo serviço tem uma rota única que sirva de
+    # exemplo, e exigir inventaria endereços falsos — que é pior que o vazio.
+    url_base: str = ""
+    metodo: MetodoHttp = MetodoHttp.GET
+    rota_exemplo: str = ""
     secret_id: str | None = None
     vault_name: str = ""
     secret_name: str = ""
@@ -106,6 +130,12 @@ class ChaveDeApi:
                     "Informe o nome do cabeçalho ou do parâmetro: sem ele, "
                     "quem pegar a chave não sabe como enviá-la."
                 )
+        self.url_base = self.url_base.strip().rstrip("/")
+        if self.url_base and not self.url_base.startswith(("http://", "https://")):
+            raise ValidationError(
+                "O endereço precisa começar com http:// ou https://. Sem o "
+                "esquema, o exemplo não roda em lugar nenhum."
+            )
         # Lugar de uso repetido só polui o relatório.
         self.usada_em = sorted({u.strip() for u in self.usada_em if u.strip()})
 
@@ -160,6 +190,55 @@ class ChaveDeApi:
         if self.formato is FormatoDaChave.QUERY:
             return f"?{self.nome_do_campo}=<valor>"
         return "Consulte a documentação do serviço."
+
+    def endereco_exemplo(self) -> str:
+        """URL completa do exemplo, já com a chave quando ela vai na query."""
+        if not self.url_base:
+            return ""
+        rota = self.rota_exemplo.strip()
+        if rota and not rota.startswith("/"):
+            rota = "/" + rota
+        url = f"{self.url_base}{rota}"
+        if self.formato is FormatoDaChave.QUERY and self.nome_do_campo:
+            juncao = "&" if "?" in url else "?"
+            url = f"{url}{juncao}{self.nome_do_campo}=<valor>"
+        return url
+
+    def requisicao_exemplo(self) -> list[tuple[str, str]]:
+        """A requisição montada, em pares (rótulo, valor).
+
+        Pares e não texto pronto: a tela precisa dos pedaços separados para
+        destacar o cabeçalho, oferecer cópia por linha e montar o `curl`. Uma
+        string única obrigaria a tela a cortá-la de volta — e aí cada tela
+        cortaria de um jeito.
+
+        O valor **nunca** entra: sai como `<valor>`. Exemplo com chave de
+        verdade vira chave em print, em chamado e em histórico de navegador.
+        """
+        linhas: list[tuple[str, str]] = []
+        endereco = self.endereco_exemplo()
+        if endereco:
+            linhas.append(("metodo", f"{self.metodo} {endereco}"))
+        if self.formato is not FormatoDaChave.QUERY:
+            linhas.append(("cabecalho", self.como_usar()))
+        return linhas
+
+    def curl_exemplo(self) -> str:
+        """O mesmo exemplo como comando `curl`, pronto para colar.
+
+        Vazio sem endereço: um `curl` sem URL não ensina nada e ainda dá a
+        impressão de que falta só preencher um buraco.
+        """
+        endereco = self.endereco_exemplo()
+        if not endereco:
+            return ""
+        partes = ["curl"]
+        if self.metodo is not MetodoHttp.GET:
+            partes.append(f"-X {self.metodo}")
+        if self.formato is not FormatoDaChave.QUERY:
+            partes.append(f"-H '{self.como_usar()}'")
+        partes.append(f"'{endereco}'")
+        return " ".join(partes)
 
 
 def expirar_vencidas(
