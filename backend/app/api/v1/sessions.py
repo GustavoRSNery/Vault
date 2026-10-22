@@ -34,6 +34,7 @@ from ...application.ports.sessions import (
 from ...domain.access.policy import Capability, evaluate
 from ...domain.audit.events import AuditAction, AuditEvent, AuditOutcome
 from ...domain.sessions.entities import (
+    MotivoDaSessao,
     ConsumoDaSessao,
     OrigemDaSessao,
     TipoDeConsumo,
@@ -46,12 +47,17 @@ from ...domain.sessions.entities import (
 )
 from ...domain.shared.errors import PermissionDeniedError
 from ...domain.shared.value_objects import PolicyPath
+from ...domain.inventory.entities import MetodoDeAcesso
+from ...infrastructure.db.models import UserModel
 from ...infrastructure.db.repositories import (
     AuditRepository,
+    CredentialRepository,
+    DeviceRepository,
     PolicyRepository,
     SessaoRepository,
 )
 from ...infrastructure.sessions.adapters import serializar
+from .inventory import get_credentials, get_devices
 from ..deps import (
     CurrentUser,
     get_audit,
@@ -104,9 +110,15 @@ class ConsumoResponse(BaseModel):
 class SessaoResponse(BaseModel):
     id: str
     usuario_label: str
+    # O nome de quem está na máquina. `usuario_label` é o e-mail, que responde
+    # "qual conta" e não "quem" — e numa tela de sessões ativas a pergunta é
+    # quem. Vazio quando a conta não existe mais: a sessão continua na trilha
+    # depois de o usuário ser removido, e o e-mail segue respondendo.
+    usuario_nome: str
     tipo: str
     alvo: str
     motivo: str
+    motivo_detalhe: str
     estado: str
     ip_address: str | None
     iniciada_em: datetime
@@ -137,7 +149,12 @@ class DetalheSessaoResponse(SessaoResponse):
 class AbrirSessaoRequest(BaseModel):
     tipo: TipoDeSessao = TipoDeSessao.OUTRO
     alvo: str = Field(min_length=1, max_length=300)
-    motivo: str = Field(default="", max_length=1000)
+    # Categoria fechada: é o que torna a pergunta "quantas sessões de
+    # incidente?" respondível. O domínio recusa valor fora da lista.
+    motivo: MotivoDaSessao
+    # O detalhe continua livre — ticket, chamado, nome do incidente. A
+    # categoria serve ao relatório; o detalhe serve à auditoria.
+    motivo_detalhe: str = Field(default="", max_length=1000)
     segredo_path: str | None = Field(default=None, max_length=256)
     # De onde parte. O IP vem do servidor; estes vêm de quem abre, porque só
     # o cliente sabe o nome da própria máquina.
@@ -191,6 +208,123 @@ def _pode_ver_todas(current: CurrentUser, policies: PolicyRepository) -> bool:
     )
 
 
+class MaquinaSshResponse(BaseModel):
+    """Uma máquina alcançável por SSH, para o seletor de alvo."""
+
+    name: str
+    display_name: str
+    host: str
+    porta: int
+    usuario_sugerido: str
+    # Caminho do segredo que abre esta máquina, quando há credencial
+    # cadastrada para ela. É o caminho, nunca o valor.
+    segredo_path: str
+    tem_credencial: bool
+    # A conexão já montada, nas duas formas que um cliente entende. Montada
+    # no servidor porque é ele que conhece host, porta e usuário — deixar a
+    # tela concatenar isso espalharia a regra por cada lugar que precisa
+    # dela, e cada um erraria a seu modo (a porta some, o usuário vira
+    # "root" chumbado).
+    comando: str
+    url: str
+
+
+class MotivoResponse(BaseModel):
+    valor: str
+    rotulo: str
+
+
+# Os rótulos moram aqui e não no domínio: são texto de interface, e traduzir
+# no servidor evita que cada tela invente o seu.
+ROTULO_DO_MOTIVO = {
+    MotivoDaSessao.MANUTENCAO: "Manutenção",
+    MotivoDaSessao.INCIDENTE: "Incidente",
+    MotivoDaSessao.DEPLOY: "Deploy",
+    MotivoDaSessao.AUDITORIA: "Auditoria",
+    MotivoDaSessao.SUPORTE: "Suporte ao cliente",
+    MotivoDaSessao.OUTRO: "Outro",
+}
+
+
+@router.get(
+    "/motivos", response_model=list[MotivoResponse], summary="Motivos de sessão"
+)
+def listar_motivos() -> list[MotivoResponse]:
+    """A lista fechada de motivos, com os rótulos da interface.
+
+    Vem do servidor para que a tela não duplique o enum: duplicado, ele
+    diverge no primeiro motivo novo e a tela passa a oferecer uma opção que
+    o domínio recusa.
+    """
+    return [
+        MotivoResponse(valor=str(m), rotulo=ROTULO_DO_MOTIVO[m])
+        for m in MotivoDaSessao
+    ]
+
+
+@router.get(
+    "/maquinas", response_model=list[MaquinaSshResponse], summary="Máquinas por SSH"
+)
+def listar_maquinas(
+    current: Annotated[CurrentUser, Depends(get_current_user)],
+    policies: Annotated[PolicyRepository, Depends(get_policies)],
+    devices: Annotated[DeviceRepository, Depends(get_devices)],
+    credentials: Annotated[CredentialRepository, Depends(get_credentials)],
+) -> list[MaquinaSshResponse]:
+    """Dispositivos com acesso SSH cadastrado, só os que o usuário enxerga.
+
+    Não há cadastro de "máquina de sessão" separado de propósito: a máquina
+    já existe em Dispositivos, com endereço e formas de acesso. Um segundo
+    cadastro criaria duas listas que divergem — e aí "qual é o IP do
+    srv-db-01?" passa a ter duas respostas.
+    """
+    minhas = policies.policies_for_user(current.id)
+    por_dispositivo: dict[str, str] = {}
+    for credencial in credentials.list_all():
+        if evaluate(minhas, credencial.path, Capability.READ) or evaluate(
+            minhas, credencial.path, Capability.LIST
+        ):
+            por_dispositivo.setdefault(credencial.device_id, str(credencial.path))
+
+    maquinas: list[MaquinaSshResponse] = []
+    for dispositivo in devices.list_all(include_inactive=False):
+        if not (
+            evaluate(minhas, dispositivo.path, Capability.READ)
+            or evaluate(minhas, dispositivo.path, Capability.LIST)
+        ):
+            continue
+        for acesso in dispositivo.acessos:
+            if acesso.metodo is not MetodoDeAcesso.SSH:
+                continue
+            caminho = por_dispositivo.get(dispositivo.id, "")
+            porta = acesso.porta or 22
+            usuario = acesso.usuario_sugerido
+            destino = f"{usuario}@{acesso.identificador}" if usuario else acesso.identificador
+            maquinas.append(
+                MaquinaSshResponse(
+                    name=str(dispositivo.name),
+                    display_name=dispositivo.display_name,
+                    host=acesso.identificador,
+                    # 22 é o padrão do protocolo; guardar None e deixar a tela
+                    # adivinhar seria repassar a decisão para cada chamador.
+                    porta=porta,
+                    usuario_sugerido=usuario,
+                    segredo_path=caminho,
+                    tem_credencial=bool(caminho),
+                    # A porta só entra quando não é a padrão: `-p 22` é ruído
+                    # num comando que a pessoa vai ler antes de colar.
+                    comando=(
+                        f"ssh {destino}" if porta == 22 else f"ssh {destino} -p {porta}"
+                    ),
+                    # `ssh://` é registrado pela IANA e os clientes de
+                    # terminal o entendem; a porta vai sempre, porque na URL
+                    # ela não custa leitura.
+                    url=f"ssh://{destino}:{porta}",
+                )
+            )
+    return maquinas
+
+
 @router.get("", response_model=list[SessaoResponse], summary="Sessões ativas")
 def listar_ativas(
     current: Annotated[CurrentUser, Depends(get_current_user)],
@@ -215,7 +349,8 @@ def listar_ativas(
         if _pode_ver_todas(current, policies)
         else sessoes.ativas_do_usuario(current.id)
     )
-    return [_resposta(s, current, sessoes) for s in visiveis]
+    nomes = _nomes_de(db, visiveis)
+    return [_resposta(s, current, sessoes, nomes) for s in visiveis]
 
 
 @router.post(
@@ -228,6 +363,7 @@ def abrir(
     sessoes: Annotated[SessaoRepository, Depends(get_sessoes)],
     captura: Annotated[CapturaDeSessao, Depends(get_captura)],
     audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> SessaoResponse:
     """Abre uma sessão e liga a captura.
 
@@ -240,7 +376,8 @@ def abrir(
         usuario_label=current.email,
         tipo=payload.tipo,
         alvo=payload.alvo,
-        motivo=payload.motivo,
+        motivo=str(payload.motivo),
+        motivo_detalhe=payload.motivo_detalhe,
         segredo_path=payload.segredo_path,
         ip_address=current.ip_address,
         origem=OrigemDaSessao(
@@ -267,10 +404,10 @@ def abrir(
     audit.append(
         _evento_auditoria(
             current, AuditAction.SESSION_OPENED, str(sessao.path),
-            reason=f"{payload.tipo} em {payload.alvo}. {payload.motivo}".strip(),
+            reason=f"{payload.tipo} em {payload.alvo}: {payload.motivo}. {payload.motivo_detalhe}".strip(),
         )
     )
-    return _resposta(sessao, current, sessoes)
+    return _resposta(sessao, current, sessoes, _nomes_de(db, [sessao]))
 
 
 @router.post(
@@ -317,6 +454,7 @@ def encerrar(
     captura: Annotated[CapturaDeSessao, Depends(get_captura)],
     gravacoes: Annotated[ArmazenamentoDeGravacao, Depends(get_gravacoes)],
     audit: Annotated[AuditRepository, Depends(get_audit)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> SessaoResponse:
     """Encerra a própria sessão e arquiva a gravação.
 
@@ -345,7 +483,7 @@ def encerrar(
             reason=f"{len(sessao.eventos)} evento(s); gravação em {gravacoes.nome}.",
         )
     )
-    return _resposta(salva, current, sessoes)
+    return _resposta(salva, current, sessoes, _nomes_de(db, [salva]))
 
 
 @router.post(
@@ -389,7 +527,7 @@ def derrubar(
             reason=f"Sessão de {sessao.usuario_label} interrompida: {payload.motivo}",
         )
     )
-    return _resposta(salva, current, sessoes)
+    return _resposta(salva, current, sessoes, _nomes_de(db, [salva]))
 
 
 @router.get(
@@ -399,6 +537,7 @@ def historico(
     current: Annotated[CurrentUser, Depends(get_current_user)],
     sessoes: Annotated[SessaoRepository, Depends(get_sessoes)],
     policies: Annotated[PolicyRepository, Depends(get_policies)],
+    db: Annotated[Session, Depends(get_db)],
     termo: Annotated[str | None, Query(max_length=100)] = None,
     limite: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[SessaoResponse]:
@@ -413,7 +552,8 @@ def historico(
         encontradas = sessoes.historico(
             termo=termo, usuario_label=current.email, limite=limite
         )
-    return [_resposta(s, current, sessoes) for s in encontradas]
+    nomes = _nomes_de(db, encontradas)
+    return [_resposta(s, current, sessoes, nomes) for s in encontradas]
 
 
 @router.get(
@@ -455,7 +595,7 @@ def detalhe(
         )
 
     capturado_por, automatica, _, _ = sessoes.metadados(sessao_id)
-    base = _resposta(sessao, current, sessoes)
+    base = _resposta(sessao, current, sessoes, _nomes_de(db, [sessao]))
     return DetalheSessaoResponse(
         **base.model_dump(),
         linha_do_tempo=[
@@ -502,16 +642,37 @@ def buscar(
     ]
 
 
+def _nomes_de(db: Session, sessoes_: list[Sessao]) -> dict[str, str]:
+    """Nome completo de cada dono de sessão, numa consulta só.
+
+    Buscar usuário por sessão faria uma lista de 20 sessões virar 21
+    consultas. Quem não for encontrado simplesmente não entra no mapa, e a
+    tela cai no e-mail: conta removida não apaga a sessão da trilha.
+    """
+    ids = {s.usuario_id for s in sessoes_ if s.usuario_id}
+    if not ids:
+        return {}
+    linhas = db.query(UserModel.id, UserModel.full_name).filter(
+        UserModel.id.in_(ids)
+    )
+    return {uid: nome for uid, nome in linhas}
+
+
 def _resposta(
-    sessao: Sessao, current: CurrentUser, sessoes: SessaoRepository
+    sessao: Sessao,
+    current: CurrentUser,
+    sessoes: SessaoRepository,
+    nomes: dict[str, str] | None = None,
 ) -> SessaoResponse:
     capturado_por, automatica, _, _ = sessoes.metadados(sessao.id)
     return SessaoResponse(
         id=sessao.id,
         usuario_label=sessao.usuario_label,
+        usuario_nome=(nomes or {}).get(sessao.usuario_id, ""),
         tipo=str(sessao.tipo),
         alvo=sessao.alvo,
         motivo=sessao.motivo,
+        motivo_detalhe=sessao.motivo_detalhe,
         estado=str(sessao.estado),
         ip_address=sessao.ip_address,
         iniciada_em=sessao.iniciada_em,

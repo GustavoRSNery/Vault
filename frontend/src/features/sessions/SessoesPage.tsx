@@ -1,16 +1,43 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError, request } from '@/shared/api/client'
-import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import {
+  Alerta,
+  Badge,
+  Botao,
+  Campo,
+  Card,
+  CardMetrica,
+  Carregando,
+  Vazio,
+} from '@/shared/ui/components'
 import { formatarDataHora } from '@/shared/lib/formato'
+
+/** Uma máquina alcançável por SSH, vinda de Dispositivos. */
+export type MaquinaSsh = {
+  name: string
+  display_name: string
+  host: string
+  porta: number
+  usuario_sugerido: string
+  segredo_path: string
+  tem_credencial: boolean
+  /** A conexão já montada pelo servidor — a tela não concatena nada. */
+  comando: string
+  url: string
+}
+
+export type MotivoDeSessao = { valor: string; rotulo: string }
 
 export type Sessao = {
   id: string
   usuario_label: string
+  usuario_nome: string
   tipo: string
   alvo: string
   motivo: string
+  motivo_detalhe: string
   estado: string
   ip_address: string | null
   iniciada_em: string
@@ -95,26 +122,37 @@ export function SessoesPage() {
   const lista = ativas ?? []
   const minhas = lista.filter((s) => s.minha)
   const alheias = lista.filter((s) => !s.minha)
+  const pessoas = new Set(lista.map((s) => s.usuario_label)).size
+  const maquinas = new Set(lista.map((s) => s.alvo)).size
 
   return (
     <>
       <header>
         <div className="row between wrap">
           <div>
-            <h1 className="display">Sessões ativas</h1>
+            <h1 className="display">Sessões SSH</h1>
             <p className="sub" style={{ margin: '4px 0 0' }}>
-              A trilha diz quem revelou qual segredo. A gravação diz o que a
-              pessoa fez com ele depois — e é essa a diferença numa
-              investigação.
+              Quem está dentro de qual máquina, agora. Conectar é em{' '}
+              <Link to="/dispositivos">Dispositivos</Link>; aqui se acompanha
+              e se encerra o que está em andamento.
             </p>
           </div>
-          <Botao pequeno onClick={() => setAbrindo(true)}>
-            Abrir sessão
+          <Botao variante="secondary" pequeno onClick={() => setAbrindo(true)}>
+            Registrar outro acesso
           </Botao>
         </div>
       </header>
 
       {erro && <Alerta tom="danger">{erro}</Alerta>}
+
+      {/* Três contagens diferentes, de propósito: duas sessões da mesma
+          pessoa na mesma máquina são 2 sessões, 1 pessoa e 1 máquina — e é
+          essa diferença que diz se o acesso está concentrado ou espalhado. */}
+      <div className="cards-3">
+        <CardMetrica rotulo="Sessões agora" valor={lista.length} tom="brand" />
+        <CardMetrica rotulo="Pessoas conectadas" valor={pessoas} tom="success" />
+        <CardMetrica rotulo="Máquinas em uso" valor={maquinas} tom="warning" />
+      </div>
 
       {abrindo && (
         <NovaSessao
@@ -130,46 +168,68 @@ export function SessoesPage() {
       <Card titulo={`Minhas sessões (${minhas.length})`}>
         {minhas.length === 0 ? (
           <Vazio
-            titulo="Nenhuma sessão sua em andamento"
-            descricao="Abra uma ao acessar um sistema com credencial do cofre."
+            titulo="Você não está em nenhuma máquina"
+            descricao="As sessões aparecem aqui quando você acessa uma máquina a partir de Dispositivos."
+            acao={
+              <Link to="/dispositivos" className="btn btn-secondary btn-sm">
+                Ir para Dispositivos →
+              </Link>
+            }
           />
         ) : (
-          <TabelaSessoes
-            sessoes={minhas}
-            acao={(s) => (
-              <Botao
-                variante="secondary"
-                pequeno
-                onClick={() => encerrar.mutate(s.id)}
-                disabled={encerrar.isPending}
-              >
-                Encerrar
-              </Botao>
-            )}
-          />
+          <div className="col" style={{ gap: 10 }}>
+            {minhas.map((s) => (
+              <CardDeSessao
+                key={s.id}
+                sessao={s}
+                acao={
+                  <Botao
+                    variante="secondary"
+                    pequeno
+                    onClick={() => encerrar.mutate(s.id)}
+                    disabled={encerrar.isPending}
+                  >
+                    Encerrar
+                  </Botao>
+                }
+              />
+            ))}
+          </div>
         )}
       </Card>
 
-      {alheias.length > 0 && (
-        <Card titulo={`Sessões de outras pessoas (${alheias.length})`}>
-          <p className="sub" style={{ marginTop: 0 }}>
-            Derrubar interrompe o trabalho de alguém — por isso exige
-            justificativa, e ela fica na trilha.
-          </p>
-          <TabelaSessoes
-            sessoes={alheias}
-            acao={(s) => (
-              <Botao
-                variante="danger"
-                pequeno
-                onClick={() => setDerrubando(s.id)}
-              >
-                Derrubar
-              </Botao>
-            )}
+      <Card titulo={`Sessões de outras pessoas (${alheias.length})`}>
+        {alheias.length === 0 ? (
+          <Vazio
+            titulo="Ninguém mais está conectado agora"
+            descricao="Aparecem aqui as sessões em andamento de outras pessoas, se você tiver permissão para vê-las."
           />
-        </Card>
-      )}
+        ) : (
+          <>
+            <p className="sub" style={{ marginTop: 0 }}>
+              Derrubar interrompe o trabalho de alguém — por isso exige
+              justificativa, e ela fica na trilha.
+            </p>
+            <div className="col" style={{ gap: 10 }}>
+              {alheias.map((s) => (
+                <CardDeSessao
+                  key={s.id}
+                  sessao={s}
+                  acao={
+                    <Botao
+                      variante="danger"
+                      pequeno
+                      onClick={() => setDerrubando(s.id)}
+                    >
+                      Derrubar
+                    </Botao>
+                  }
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
 
       {derrubando && (
         <FormularioDerrubar
@@ -184,6 +244,85 @@ export function SessoesPage() {
       )}
     </>
   )
+}
+
+/**
+ * Uma sessão ativa, em card.
+ *
+ * As três perguntas de quem olha uma sessão em andamento são **quem**, **em
+ * qual máquina** e **há quanto tempo** — e numa tabela de oito colunas elas
+ * ficam espremidas entre dados que só importam depois. O card põe as três em
+ * primeiro plano e empurra o resto para a segunda linha.
+ *
+ * O tempo é recalculado a cada segundo: "há 3 minutos" congelado numa tela
+ * aberta há meia hora é pior que não mostrar nada.
+ */
+function CardDeSessao({
+  sessao,
+  acao,
+}: {
+  sessao: Sessao
+  acao?: React.ReactNode
+}) {
+  const [agora, setAgora] = useState(() => Date.now())
+
+  useEffect(() => {
+    const t = window.setInterval(() => setAgora(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+
+  const desde = new Date(sessao.iniciada_em).getTime()
+  const decorrido = Number.isFinite(desde) ? Math.max(agora - desde, 0) : sessao.duracao_ms
+
+  return (
+    <div className="card sessao-card">
+      <div className="row between wrap" style={{ gap: 12 }}>
+        <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
+          <span className="avatar" aria-hidden="true">
+            {iniciaisDe(sessao.usuario_nome || sessao.usuario_label)}
+          </span>
+          <div className="col" style={{ gap: 2 }}>
+            <b>{sessao.usuario_nome || sessao.usuario_label}</b>
+            {/* O e-mail só aparece quando há nome: repetido sozinho, viraria
+                a mesma linha duas vezes. */}
+            {sessao.usuario_nome && (
+              <span className="help">{sessao.usuario_label}</span>
+            )}
+            <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <Badge tom="muted">{sessao.tipo}</Badge>
+              <Link to={`/sessoes/${sessao.id}`}>{sessao.alvo}</Link>
+            </span>
+            <span className="help">
+              {sessao.origem?.identificada
+                ? `de ${sessao.origem.descricao}`
+                : 'origem não identificada'}
+              {sessao.motivo && ` · ${sessao.motivo}`}
+              {sessao.motivo_detalhe && ` — ${sessao.motivo_detalhe}`}
+            </span>
+          </div>
+        </div>
+
+        <div className="col" style={{ gap: 2, alignItems: 'flex-end' }}>
+          <span className="sessao-tempo" title={formatarDataHora(sessao.iniciada_em)}>
+            {formatarDuracao(decorrido)}
+          </span>
+          <span className="help">na máquina</span>
+          {acao}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Duas iniciais do nome ou do e-mail, para o avatar. */
+function iniciaisDe(rotulo: string): string {
+  const base = rotulo.includes('@') ? rotulo.split('@')[0] ?? rotulo : rotulo
+  return base
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join('')
 }
 
 export function TabelaSessoes({
@@ -220,7 +359,8 @@ export function TabelaSessoes({
                 </div>
               </td>
               <td className="muted">
-                {s.usuario_label}
+                {s.usuario_nome || s.usuario_label}
+                {s.usuario_nome && <div className="help">{s.usuario_label}</div>}
                 {s.ip_address && <div className="help">{s.ip_address}</div>}
               </td>
               <td className="muted">{formatarDataHora(s.iniciada_em)}</td>
@@ -307,6 +447,20 @@ function NovaSessao({
   const [tipo, setTipo] = useState('ssh')
   const [alvo, setAlvo] = useState('')
   const [motivo, setMotivo] = useState('')
+  const [motivoDetalhe, setMotivoDetalhe] = useState('')
+
+  // As duas listas vêm do servidor: duplicá-las aqui as faria divergir do
+  // domínio no primeiro valor novo, e a tela ofereceria uma opção que a API
+  // recusa.
+  const { data: maquinas } = useQuery({
+    queryKey: ['sessoes', 'maquinas'],
+    queryFn: () => request<MaquinaSsh[]>('/sessoes/maquinas'),
+  })
+  const { data: motivos } = useQuery({
+    queryKey: ['sessoes', 'motivos'],
+    queryFn: () => request<MotivoDeSessao[]>('/sessoes/motivos'),
+    staleTime: 10 * 60_000,
+  })
   const [maquina, setMaquina] = useState('')
   const [consumoTipo, setConsumoTipo] = useState('nao_identificado')
   const [consumoNome, setConsumoNome] = useState('')
@@ -324,6 +478,7 @@ function NovaSessao({
           tipo,
           alvo,
           motivo,
+          motivo_detalhe: motivoDetalhe.trim(),
           origem_hostname: maquina.trim(),
           consumo_tipo: consumoTipo,
           consumo_nome: consumoNome.trim(),
@@ -355,18 +510,77 @@ function NovaSessao({
           </select>
         </div>
 
+        {/* Alvo e motivo saem de listas, não de texto livre. Livres, viram
+            "srv-prod", "SRV-PROD" e "servidor de producao" para a mesma
+            máquina — e aí nenhuma pergunta sobre acesso tem resposta. */}
+        <div className="field">
+          <label htmlFor="alvo">Máquina</label>
+          <select
+            id="alvo"
+            className="input"
+            value={alvo}
+            onChange={(e) => {
+              setAlvo(e.target.value)
+              const m = maquinas?.find((x) => x.name === e.target.value)
+              // Preenche o caminho da credencial sozinho: quem escolheu a
+              // máquina já disse qual segredo usa, e pedir de novo só
+              // convidaria a digitar errado.
+              if (m?.segredo_path) {
+                setCaminho(m.segredo_path)
+                setConsumoTipo('credencial')
+                setConsumoNome(m.segredo_path.split('/').pop() ?? '')
+              }
+            }}
+            autoFocus
+          >
+            <option value="">Escolha a máquina…</option>
+            {(maquinas ?? []).map((m) => (
+              <option key={m.name} value={m.name}>
+                {m.display_name} — {m.host}:{m.porta}
+                {m.usuario_sugerido ? ` (${m.usuario_sugerido})` : ''}
+              </option>
+            ))}
+          </select>
+          <span className="help">
+            {maquinas && maquinas.length === 0 ? (
+              <>
+                Nenhuma máquina com acesso SSH cadastrado. Cadastre em{' '}
+                <Link to="/dispositivos">Dispositivos</Link>, na coluna
+                Acesso.
+              </>
+            ) : (
+              'Só aparecem as máquinas com acesso SSH cadastrado em Dispositivos.'
+            )}
+          </span>
+        </div>
+
+        <div className="field">
+          <label htmlFor="motivo">Motivo</label>
+          <select
+            id="motivo"
+            className="input"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+          >
+            <option value="">Escolha o motivo…</option>
+            {(motivos ?? []).map((m) => (
+              <option key={m.valor} value={m.valor}>
+                {m.rotulo}
+              </option>
+            ))}
+          </select>
+          <span className="help">
+            A categoria é o que permite medir por que as pessoas entram nas
+            máquinas.
+          </span>
+        </div>
+
         <Campo
-          rotulo="Alvo"
-          value={alvo}
-          onChange={(e) => setAlvo(e.target.value)}
-          ajuda="O sistema que você vai acessar. Ex.: srv-producao, pg-financeiro."
-          autoFocus
-        />
-        <Campo
-          rotulo="Motivo"
-          value={motivo}
-          onChange={(e) => setMotivo(e.target.value)}
-          ajuda="Fica na trilha. Opcional, mas é o que responde 'por que esse acesso?' depois."
+          rotulo="Detalhe (opcional)"
+          value={motivoDetalhe}
+          onChange={(e) => setMotivoDetalhe(e.target.value)}
+          ajuda="Ticket, chamado ou o que esta sessão teve de particular. Fica na trilha."
+          placeholder="ticket #4417 — lentidão no banco"
         />
 
         <Campo
@@ -429,6 +643,9 @@ function NovaSessao({
         <div className="row" style={{ gap: 10 }}>
           <Botao onClick={() => abrir.mutate()} disabled={
               !alvo.trim() ||
+              // O motivo é obrigatório no domínio; travar aqui evita o 422
+              // e diz antes o que falta, em vez de depois.
+              !motivo ||
               (precisaNome && !consumoNome.trim()) ||
               abrir.isPending
             }>
