@@ -966,6 +966,606 @@ Segunda rodada: **6 de 6 mortos, zero sobreviventes.**
 
 ---
 
+## 2026-10-21 — Resumo e detalhe trocados de lugar
+
+O usuário notou a inconsistência: *"a aba de resumo tem mais gráficos que o
+restante"*. Medindo: o resumo tinha **3 gráficos** (tira de 30 colunas + dois
+rankings top-8) e as abas de detalhe tinham **1 ou nenhum**. Estava invertido.
+
+### O que a pesquisa diz
+
+O cânone é o **Visual Information Seeking Mantra** de Shneiderman (1996):
+*overview first, zoom and filter, then details-on-demand*. As três etapas
+têm conteúdos distintos — a visão geral carrega valor atual, variação e
+status; o detalhe carrega séries, registros, quebras por categoria e filtros.
+A justificativa citada para manter a primeira tela enxuta é a **Lei de
+Hick**: mais opções simultâneas atrasam a decisão.
+
+Série temporal com seletor de período é *zoom and filter*; ranking top-8 é
+*details-on-demand*. Os dois estavam na aba cuja função é dar o panorama.
+
+### De onde veio o erro
+
+Não foi acidente de layout. O resumo **nasceu primeiro**, antes de existirem
+abas. Quando acrescentei as abas, movi os dados novos para elas e deixei o
+conteúdo antigo onde estava, em vez de redistribuir — o resumo virou "a tela
+antiga mais um cabeçalho".
+
+### Como ficou
+
+**Resumo:** 4 KPIs, o bloco de pendências e **uma** tira de atividade em
+janela fixa de 7 dias, sem seletor. Um link leva à aba Cofres para quem
+quiser mais.
+
+**Aba Cofres** recebeu a série com seletor 7/30/90 e os dois rankings — o
+assunto deles é este domínio: quem revela segredos, e quais segredos.
+
+**Abas de detalhe** ganharam o que lhes faltava: distribuição por faixa de
+tempo em Certificados (quando vencem), Credenciais (há quanto tempo foram
+trocadas) e Chaves de API (quando as ativas vencem).
+
+O componente `Atividade` foi extraído para servir aos dois lugares,
+parametrizado pelo que muda — o resumo passa um rodapé que leva ao detalhe, a
+aba passa o seletor. Duplicar o bloco faria os dois divergirem no primeiro
+ajuste.
+
+**Mitigação do custo:** uma das fontes aponta que *overview + detail* em
+telas separadas dificulta relacionar informação entre as visões. Os mesmos
+KPIs aparecem no topo de cada aba, então o número visto no resumo reaparece
+idêntico no detalhe e serve de âncora.
+
+### Faixas acumulativas contariam o mesmo item duas vezes
+
+As faixas de vencimento são **excludentes**: cada item cai na primeira cujo
+teto alcança. Lidas como tetos independentes, "vence em 30 dias" e "vence em
+90" descreveriam o mesmo certificado, e o gráfico mostraria mais itens do que
+existem. O teste prende isso exigindo que a soma das faixas feche o total.
+
+Os cortes não são redondos por acaso: **7 dias** é o que sobra para uma
+renovação de emergência, **30** é o prazo de uma emissão manual tranquila,
+**90** é o horizonte de planejamento.
+
+### Primeiro desenho da linha do tempo estava errado
+
+Usei `ColunasCompactas` e, na tela, as cinco faixas saíram **todas da mesma
+altura** — com um item em cada, o teto é 1 e a forma não informa nada. Trocei
+por barras horizontais com o número escrito ao lado: com poucas categorias de
+valor parecido, a altura não distingue e o número resolve. A barra mede
+contra a **maior faixa**, não contra o total, senão cinco faixas de 1 item
+dariam cinco fios de 20%.
+
+### Mutação
+
+9 mutantes, 9 mortos — depois de duas rodadas. O sobrevivente da primeira
+levou a uma lacuna de dado, não de código: nenhum teste criava chave de API
+**revogada com vencimento**, então trocar `ativas` por `todas_chaves` no
+gráfico não quebrava nada.
+
+Ao escrever esse teste, errei o payload: enviei `expira_em`, e o cadastro
+recebe `dias_de_validade` — a data é derivada no servidor, para não depender
+do relógio de quem chama. O Pydantic descartou o campo desconhecido em
+silêncio e a soma deu zero. Mesma classe do bug do `expira_em` no PUT, agora
+do lado do teste.
+
+---
+
+## 2026-10-21 — Lote 1: Sessões SSH e aprovação em massa
+
+Primeiro de três lotes de um pedido grande (14 frentes em 7 páginas).
+
+### Alvo e motivo deixaram de ser texto livre
+
+O pedido foi direto: *"campo de alvo e motivo não pode ser aberto, pq se não
+fica impossível mensurar"*. Procede — como texto livre, o mesmo servidor vira
+`srv-prod`, `SRV-PROD` e `servidor de producao`, e a pergunta "quantas
+sessões de incidente tivemos no mês?" deixa de ter resposta.
+
+- **Alvo** virou seletor das máquinas com acesso SSH cadastrado.
+- **Motivo** virou lista fechada (`MotivoDaSessao`), validada no domínio.
+- **Detalhe** continua livre, ao lado: a categoria serve ao relatório, o
+  detalhe serve à auditoria. Perder o "ticket #4417" seria trocar um problema
+  por outro.
+
+### Nenhum cadastro novo de máquina
+
+A parte que **não** construí é a que mais importa aqui. O pedido falava em
+"cadastrar a máquina com o código de conexão SSH", e a tentação era criar uma
+tabela de máquinas de sessão. Mas a máquina já existe em **Dispositivos**,
+com endereço, e `AcessoRemoto` já tem `metodo=ssh`, `identificador`, `porta` e
+`usuario_sugerido` — tudo o que uma sessão SSH precisa.
+
+Um segundo cadastro criaria duas listas que divergem, e aí "qual é o IP do
+srv-db-01?" passa a ter duas respostas. Em vez disso, `GET /sessoes/maquinas`
+projeta os dispositivos que têm acesso SSH, já com o caminho da credencial
+quando existe — e a tela preenche o resto sozinha quando a máquina é
+escolhida.
+
+A senha segue a mesma lógica: não há "cadastrar senha da sessão". Ou a
+credencial está no cofre (e a sessão aponta o caminho, nunca o valor), ou a
+tela diz que não está.
+
+### Card da sessão ativa
+
+As três perguntas de quem olha uma sessão em andamento são **quem**, **em qual
+máquina** e **há quanto tempo**. Numa tabela de oito colunas elas ficavam
+espremidas entre dados que só importam depois. Agora são card, com o tempo
+recalculado a cada segundo — "há 3 minutos" congelado numa tela aberta há meia
+hora é pior que não mostrar nada.
+
+### Aprovação em massa
+
+`POST /solicitacoes/aprovar-em-lote` processa um a um e **relata cada
+resultado**. Três decisões:
+
+- Cada pedido gera **seu próprio evento de auditoria**. Um evento único de
+  "lote aprovado" esconderia *o que* foi concedido — justamente o que uma
+  auditoria vai revisar.
+- Uma falha **não derruba as outras**, mas aparece na resposta com a razão.
+  Aprovar 20 e receber "ok" quando 3 falharam seria pior que não ter o botão.
+- Ids repetidos processam uma vez só, e cada pedido passa pela **mesma
+  checagem de permissão** da aprovação individual: o lote é conveniência, não
+  caminho lateral.
+
+Na tela, a caixa "selecionar todas" tem estado **indeterminado** quando a
+seleção é parcial — senão ela mostraria "nada selecionado" com 3 de 7
+marcados.
+
+### A ideia do usuário: se já puxa tudo, por que pedir para montar?
+
+Depois de ver o seletor funcionando, o usuário levou a decisão adiante:
+*"já que ele puxa tudo de lá, vamos puxar tb os dados de acesso e preencher
+isso tudo automaticamente, e sem precisar de alguém criar uma nova
+conexão"*. Procede, e muda o fluxo de lugar.
+
+A tela deixou de começar por "Abrir sessão" e passa a começar por **"Máquinas
+que você alcança"** — porque ninguém vai a Sessões para abrir uma sessão, vai
+para **entrar numa máquina**. O registro é consequência, não o pedido.
+
+Cada máquina traz o comando pronto (`ssh deploy@10.0.0.5 -p 2222`), a
+credencial do cofre e um botão **Conectar**. O passo seguinte pede só o
+motivo — a única coisa que o sistema não tem como saber sozinho. Aberta a
+sessão, aparece o painel com o comando, botão de copiar, link `ssh://` e o
+atalho para revelar a senha.
+
+Detalhes que decidem a qualidade:
+
+- **O comando é montado no servidor**, não na tela. Deixar o front concatenar
+  host, porta e usuário espalharia a regra por cada lugar que precisa dela, e
+  cada um erraria a seu modo: a porta some, o usuário vira "root" chumbado.
+- **`-p` só aparece quando a porta não é 22.** `-p 22` é ruído num comando
+  que a pessoa lê antes de colar. Na URL a porta vai sempre, porque ali não
+  custa leitura.
+- **Sem usuário sugerido, o comando sai só com o host.** Inventar "root"
+  seria pior que deixar a pessoa completar.
+- **O comando nunca carrega a senha** — nada de `sshpass`. Senha em comando é
+  senha no histórico do shell de quem colou, fora do cofre e fora da
+  auditoria. É a mesma regra do arquivo `.rdp`, que já saía sem senha.
+
+### Erros que os testes pegaram
+
+1. A regra nova quebrou **32 testes** de uma vez, todos abrindo sessão com
+   motivo livre. Separar foi fácil porque só 2 abriam sessão; os outros 30
+   eram `motivo` de *encerramento* e de recuperação de senha, que seguem
+   livres — e devem seguir.
+2. Escrevi um teste que aprovava um pedido antes do lote e esperava 2 de 3
+   aprovados. Deu 3. A causa era o **meu teste**: a aprovação prévia foi
+   enviada sem corpo e devolveu 422, então nunca aconteceu. Asserção no
+   status da chamada preparatória resolveu.
+3. Corrigi os testes e2e e **dei a suíte por fechada cedo demais** — os
+   unitários montam `Sessao` direto, sem passar pela API, e também quebraram.
+   Foram 25 falhas numa segunda rodada. A correção foi de uma linha (o helper
+   `_sessao` tem um dicionário `base` único), mas a lição é que validar por
+   recorte (`-k "sessao"`) não substitui a suíte inteira: o recorte pegava os
+   e2e e deixava os unitários de fora.
+
+---
+
+## 2026-10-22 — Sessões SSH: acompanhar, não conectar
+
+O usuário apontou duas coisas na tela de Sessões: faltava **ver quem está
+acessando**, e o botão **Conectar** não devia estar ali — a função já existe
+em Dispositivos, e a tela de sessões é para acompanhar.
+
+### A tela tinha duas profissões
+
+Na véspera eu havia posto "Máquinas que você alcança" no topo, com Conectar
+por máquina. Resolvia um problema real (ninguém vai a Sessões para "abrir uma
+sessão"), mas pela porta errada: criou um **segundo** lugar de conectar, e
+duas telas que fazem a mesma coisa divergem no primeiro ajuste. A função
+pertence a Dispositivos, onde o cadastro mora. Sessões responde *quem está
+dentro de qual máquina agora*.
+
+Removidos `ConexaoAberta`, `MaquinasDisponiveis` e `Conectar` (~7.100
+caracteres). `MaquinaSsh` ficou: o registro manual de acesso usa a lista para
+oferecer as máquinas conhecidas em vez de texto livre.
+
+### `usuario_label` responde "qual conta", não "quem"
+
+O campo que existia era o e-mail. Numa lista de sessões alheias,
+`a.souza@` e `a.santos@` se confundem onde "Ana Souza" e "Ana Santos" não se
+confundiriam. Acrescentei `usuario_nome` — e o e-mail **continua**, porque é
+ele que desempata homônimos.
+
+Resolvido por `_nomes_de(db, sessoes)`, **uma consulta** com `id IN (...)`:
+buscar usuário por sessão faria uma lista de 20 virar 21 consultas. Quem não
+for encontrado não entra no mapa e a tela cai no e-mail — conta removida não
+apaga a sessão da trilha.
+
+Propagado às **6** rotas que devolvem sessão. Um campo preenchido em uma
+rota e vazio nas outras é pior que não existir: a mesma pessoa apareceria com
+nome numa tela e com e-mail na outra.
+
+### Três contagens que não são a mesma
+
+**Sessões agora**, **Pessoas conectadas**, **Máquinas em uso**. Duas sessões
+da mesma pessoa na mesma máquina são 3 números diferentes (2, 1, 1) — e é
+essa diferença que diz se o acesso está concentrado ou espalhado. Confirmado
+na tela: 3 sessões, 2 pessoas, 3 máquinas.
+
+### Vazio que responde em vez de sumir
+
+"Sessões de outras pessoas" só aparecia quando havia alguma. Numa tela de
+acompanhamento, a seção sumir deixa a pergunta sem resposta visível: quem
+olha não sabe se ninguém está conectado ou se o bloco não existe. Passou a
+dizer **"Ninguém mais está conectado agora"**.
+
+O vazio de "Minhas sessões" também mudou: mandava "abra uma ao acessar um
+sistema", coisa que ali já não se faz. Agora aponta Dispositivos.
+
+### O que o botão Conectar nunca fez
+
+Vale registrar, porque a mesma limitação vale para Dispositivos: ele **nunca
+abriu terminal**. Montava o comando `ssh` e oferecia copiar ou chamar o
+cliente do sistema via `ssh://`. Acesso de dentro do navegador exige proxy SSH
+— que é justamente o item **BLOQUEADO** no fim deste arquivo. Com ele, a
+gravação passaria a ser automática.
+
+### Mutação
+
+6 mutantes, **0 sobreviventes**, com integridade verde antes e restauração
+verde depois. O que mais importa é o segundo: trocar o nome de *quem abriu* pelo
+de *quem consulta* morre — um teste com uma pessoa só passaria, e era
+exatamente o erro que apagaria a distinção numa lista de sessões alheias.
+
+| Mutante | |
+|---|---|
+| nome sempre vazio (campo decorativo) | morto |
+| nome de quem CONSULTA, não de quem abriu | morto |
+| mapa de nomes nunca consultado | morto |
+| histórico sem nomes resolvidos | morto |
+| detalhe sem nomes resolvidos | morto |
+| abrir sem nomes resolvidos | morto |
+
+### Erros que apareceram no caminho
+
+1. Concedi a política em `sessoes/*` e a sessão alheia não apareceu: o
+   caminho avaliado é `sessoes` **exato**. O teste de duas pessoas pegou.
+2. Rodei o gate Postgres com senha adivinhada (`vault:vault`) e colhi **426
+   erros**. Eram todos `password authentication failed` — falha de conexão,
+   não de código. Ler a causa antes de interpretar o número evitou "a suíte
+   quebrou".
+3. Contas de teste com domínio `.local` deram 422 no login: `EmailStr` não
+   aceita o TLD. E apaguei os usuários deixando política e papel órfãos, o
+   que fez a recriação colidir em `politicas_name_key`.
+4. Li "48min" nos três cards e **suspeitei do relógio**. Estava certo: as
+   sessões tinham mesmo 48 minutos, abertas enquanto o gate Postgres rodava.
+   Conferir contra o backend (`duracao_ms=2908589` ≈ 2909s reais) antes de
+   "corrigir" evitou um conserto do que não estava quebrado.
+
+### Gate
+
+- SQLite: **832 verdes** (823 + 5 novos + 4 que já existiam no arquivo)
+- Postgres: **100 integration + 341 e2e = 441 verdes**, 18min24s — a
+  duração é o que confirma que rodou mesmo contra Postgres
+- `eslint --max-warnings 0` e `npm run build` limpos
+- Conferido na tela com 2 contas descartáveis e 3 sessões, depois removidas
+
+---
+
+## 2026-10-22 — Lote 2: criar credencial, guardar certificado, chamar a API
+
+Três formulários que faltavam, e um deles obrigou a mexer no backend.
+
+### O backend já esperava por isto
+
+`CertificateModel` tinha `secret_id` com um comentário dizendo que a chave
+privada, quando guardada, é segredo cifrado no cofre. `SecretKind` já tinha
+`CERTIFICATE`. A arquitetura previa o upload antes de ele existir — guardar o
+arquivo virou **reusar o cofre**, não construir armazenamento novo.
+
+O mesmo valeu para credenciais: `POST /dispositivos/{nome}/credenciais` já
+existia. Faltava só a tela, o que mudou o tamanho do trabalho assim que
+conferi em vez de supor.
+
+### Duas permissões para guardar um arquivo, não uma
+
+Guardar exige `UPDATE` no certificado **e** `CREATE` no cofre de destino.
+Checar só a primeira deixaria quem administra certificados gravar em qualquer
+cofre por esta porta — e ninguém procuraria por ali, porque a tela de
+certificados não parece uma tela de cofre.
+
+Baixar exige `REVEAL` no cofre, não `READ` no certificado: acompanhar
+vencimento é rotina de quem cuida de prazos; sacar um `.pfx` entrega a chave
+privada da empresa. São perguntas diferentes e merecem permissões diferentes.
+
+Reenviar **versiona** em vez de sobrescrever: é o que responde "com qual
+arquivo isso foi assinado em março?".
+
+### O parser de X.509 é nosso, de propósito
+
+~200 linhas legíveis em vez de uma dependência. O caminho que processa
+arquivo de origem externa é exatamente onde uma dependência comprometida faz
+mais estrago, e o que precisamos do X.509 é pouco: serial, emissor, validade,
+titular.
+
+`.pfx`/`.p12` **não** é aberto: abrir exigiria a senha na tela, e a senha do
+`.pfx` é segredo do cofre, não campo de formulário. A tela guarda o arquivo e
+pede os campos.
+
+### O openssl como gabarito achou dois erros meus
+
+Gerei um certificado real e comparei com `openssl x509 -noout -subject
+-issuer -serial -dates`. Dois achados:
+
+1. **O serial perdia o zero à esquerda.** Eu tratava `08…` como padding de
+   sinal do DER e cortava. O openssl imprime todos os bytes — e um serial
+   que não casa com o da autoridade emissora não serve para nada, já que
+   conferir contra ela é sua única função.
+2. **A ordem do DN.** Aqui o errado era meu *gabarito*: eu havia gerado com
+   `-nameopt RFC2253`, que inverte. O padrão é a ordem do DER, que o parser
+   já produzia.
+
+A diferença entre os dois importa: no primeiro corrigi o código, no segundo o
+teste. Testar contra a própria leitura teria validado os dois erros.
+
+Acrescentei uma verificação que roda o openssl de verdade sobre PEM e DER em
+disco e compara campo a campo. **Prova positiva:** ela pula sem a variável de
+ambiente, passa com o parser certo e **falha** com o parser sabotado — testei
+as três. Ela vive no scratchpad, não na suíte: usa APIs do Node que o
+`tsconfig` de browser não conhece, e a suíte não pode depender de uma
+ferramenta externa para passar.
+
+### Importação: detectar o formato, não perguntar
+
+Quem acabou de exportar de outra ferramenta sabe que clicou em "exportar",
+não o nome do formato. Seletor errado produz importação vazia, e a conclusão é
+que o arquivo veio corrompido. A tela tenta formato próprio → Bitwarden →
+1Password → lista genérica, **nessa ordem**: a genérica casa com quase tudo e,
+posta antes, roubaria os específicos.
+
+**A senha nunca entra**, mesmo quando o arquivo a traz — e arquivos de
+gerenciador trazem. A tela conta quantas vinham e diz que foram descartadas,
+em vez de ficar calada.
+
+Ignorados também são ditos: "Contrato do datacenter (não é login)". Silêncio
+sobre o que ficou de fora esconde perda.
+
+### Chave de API: o exemplo que roda
+
+Saber que a chave vai em `Authorization: Bearer` não diz *contra o quê*.
+Acrescentei endereço, método e rota de exemplo — todos opcionais, porque nem
+todo serviço tem uma rota única que sirva, e exigir faria alguém inventar um
+endereço, que é pior que o vazio.
+
+A requisição é montada **no servidor**, em pares (rótulo, valor), pela mesma
+razão do comando SSH: deixar a tela concatenar espalharia a regra. O valor
+sai sempre como `<valor>` — exemplo com chave de verdade vira chave em print,
+em chamado e em histórico de navegador.
+
+### Mutação: 5 sobreviventes na primeira rodada
+
+A bateria pegou o que eu não tinha coberto — e o pior era conhecido:
+
+| Mutante | 1ª rodada | 2ª |
+|---|---|---|
+| baixar não exige REVEAL no cofre | morto | morto |
+| guardar não exige CREATE no cofre (escalada lateral) | morto | morto |
+| guardar não exige UPDATE no certificado | **sobreviveu** | morto |
+| reenvio sobrescreve em vez de versionar | morto | morto |
+| `tem_arquivo` sempre falso | morto | morto |
+| base64 inválido passa em silêncio | morto | morto |
+| curl ignora o método (POST vira GET) | **sobreviveu** | morto |
+| chave na query também vai no cabeçalho | **sobreviveu** | morto |
+| url sem esquema é aceita | **sobreviveu** | morto |
+| **PUT da chave ignora a rota** | **sobreviveu** | morto |
+
+O último é a terceira vez que este projeto encontra o mesmo bug: campo novo
+aceito pelo PUT, devolvido na resposta e **não gravado** — some no próximo
+GET, sem erro nenhum. Desta vez o teste relê do banco em vez de conferir a
+resposta do PUT, que é o que distingue os dois casos.
+
+Depois dos testes novos: **10 mutantes, 0 sobreviventes.**
+
+### Um teste que passava pelo motivo errado
+
+`test_sem_permissao_no_cofre_nao_guarda` aceitava 403 **ou** 404. Tentei
+endurecer para 403 e descobri que o cofre devolve **404** a quem não o
+enxerga — não revelar a existência é deliberado. Exigir 403 seria exigir um
+vazamento.
+
+A correção não foi no código de status: o teste passou a verificar o
+**efeito** — que `tem_arquivo` continua falso depois da tentativa. O que
+importa é que não gravou, não como a recusa foi numerada.
+
+### Gate
+
+- SQLite: **848 verdes** (832 + 16 novos)
+- Frontend: **49 testes** (18 + 31 novos), lint `--max-warnings 0` e build limpos
+- **17 verificações de ponta a ponta contra a API real**: o certificado de
+  1.316 bytes volta **idêntico** depois de cifrado e decifrado, e o reenvio
+  gera versão 2
+- `evoluir_schema` aplicou as 5 colunas novas sozinho no boot
+- Conferido na tela: importação Bitwarden (3 reconhecidas, 1 nota ignorada,
+  2 senhas descartadas), terminal openssl e os três blocos do exemplo da API
+
+---
+
+## 2026-10-22 — Lote 3: tours, tutorial de API, gravações em grade
+
+E um bug de produção que só apareceu porque fui conferir na tela.
+
+### O bug: um registro antigo derrubava a listagem inteira
+
+Ao abrir Gravações para validar o novo layout, a tela veio **vazia**. A rota
+devolvia **422**:
+
+> Motivo 'Validacao' não é uma opção. Escolha entre: manutencao, incidente…
+
+No Lote 1 fechei a lista de motivos. A validação roda no `__post_init__` da
+entidade — e o `__post_init__` roda também **na leitura**, quando o
+repositório monta a `Sessao` a partir do banco. Quatro sessões gravadas antes
+da mudança (`Validacao`, `Conferencia do fechamento`) passaram a ser
+ilegíveis, e como a rota monta a lista inteira de uma vez, **um registro
+antigo escondia todos os corretos**.
+
+**A correção separa criação de leitura**, em vez de afrouxar a regra ou
+apagar o passado:
+
+- campo `legado: bool` na entidade, ligado **só** pelo repositório ao ler;
+- `if not self.legado and self.motivo not in …` — a checagem da lista vale
+  para quem entra agora;
+- tudo o mais (motivo vazio, alvo ausente) continua recusado nos dois casos.
+
+Reescrever o motivo dos registros antigos seria pior: a trilha passaria a
+dizer que aquela sessão foi de "manutenção" quando ninguém escreveu isso.
+
+**Prova positiva:** com a correção revertida, 2 dos 3 testes novos falham;
+restaurada, os 3 passam. O terceiro — criar com motivo fora da lista continua
+recusado — passa nos dois casos, porque guarda a regra que *não* mudou.
+
+Na tela, depois: 11 gravações listadas, com `srv-validacao-67` ("Validacao") e
+`pg-contabil` ("Conferencia do fechamento") convivendo com as novas.
+
+**A lição:** validação de domínio que roda na hidratação do banco transforma
+mudança de regra em perda de leitura. O passado não se conforma à regra nova,
+e insistir não corrige o cadastro — quebra a auditoria.
+
+### Tours: oferecidos, nunca impostos
+
+Cinco tours, um por tela de Segredos. Abre sozinho **na primeira visita** e
+some para sempre depois de concluído ou dispensado; o botão "Como funciona?"
+reabre. Tour que reaparece é treinamento para clicar em "fechar" sem ler.
+
+O destaque é um **recorte na cortina** (`box-shadow: 0 0 0 9999px`), não uma
+borda colorida: escurecer tudo menos o elemento diz "olhe aqui" sem
+acrescentar mais uma cor à interface que está sendo explicada.
+
+Cada passo fala de **conceito e sequência**, não de mecânica de botão. Um
+tour que explica o que um campo faz está consertando um rótulo ruim — e o
+conserto some quando a pessoa fecha o tour.
+
+Decisões que viraram teste: primeiro passo sem âncora (explica a tela antes
+de apontar), texto ≤ 300 caracteres, âncora sempre `[data-tour="…"]` e nunca
+classe de estilo (que quebraria em silêncio no primeiro ajuste de CSS), e
+`localStorage` que **nunca lança** — em aba anônima o acesso falha, e um tour
+capaz de derrubar a tela ao abrir é pior que tour nenhum.
+
+### Tutorial de API: só leitura, e isso é decisão
+
+Botão "Ver pela API" nas cinco telas de Segredos e em Gravações, com os
+endpoints de consulta, `curl` pronto e exemplo de resposta.
+
+**Nenhum `POST` documentado.** Criar e alterar continuam passando pela
+interface, onde cada ação tem confirmação, justificativa e trilha. Documentar
+escrita aqui convidaria a automatizá-la — e escrita automatizada sem revisão é
+como inventários ganham dezenas de registros que ninguém reconhece depois.
+
+O token sai como `$VAULT_TOKEN`, com o aviso de guardá-lo numa variável: o
+`curl` é feito para ser colado tal como está, e token no comando fica no
+histórico do shell.
+
+### Gravações: grade em vez de tabela
+
+Uma gravação é **assistida, não comparada**. A pergunta é "qual delas eu
+abro", e a tabela de oito colunas respondia à pergunta errada. A tabela
+continua num alternador, porque comparar lado a lado ainda serve para a
+revisão periódica.
+
+A miniatura é a **barra de atividade**: doze traços, mais altos onde houve
+mais eventos. Derivada de duração e contagem, não da linha do tempo — baixar
+o conteúdo de todas as gravações para desenhar barrinhas seria caro e, pior,
+despejaria no navegador o que as pessoas digitaram em produção sem ninguém
+ter aberto nada.
+
+Por isso ela representa **densidade**, não instantes: o cartão não promete
+onde clicar, mostra se a sessão foi intensa ou calma. A semente vem do id
+para o desenho ser estável — com `Math.random()` as barras tremeriam a cada
+tecla digitada na busca.
+
+Na tela, lado a lado: `srv-db-prod` (140 eventos) com barras cheias e
+`srv-ssh-demo` (6) quase rasas.
+
+### Linha clicável e botão voltar
+
+Em Cofres, a linha inteira abre o cofre — alvo do tamanho do texto obriga a
+mirar, e a linha toda é o que a pessoa já tenta clicar antes de descobrir que
+não funciona. Com `role="link"` e `tabIndex`, porque `<tr>` não é focável e
+sem isso o teclado não alcança.
+
+**Correção de um levantamento meu:** eu havia dito que as subtelas não tinham
+volta. Elas tinham — um breadcrumb com link para a listagem. Busquei pela
+palavra "Voltar" e não vi os crumbs. O que fiz foi acrescentar o botão
+explícito **acima** do crumb: o crumb diz onde você está, o botão diz como
+sair, e um não substitui o outro.
+
+`<Link>` de verdade, não botão com `history.back()`: quem chega por link
+direto não tem histórico, e numa aba nova `back()` sai do sistema.
+
+### Gate
+
+- SQLite: **858 verdes** (848 + 10 do motivo legado)
+- Frontend: **76 testes** (49 + 27 novos), lint `--max-warnings 0` e build limpos
+- Postgres do **Lote 2**: 457 verdes, 11min51s
+- Postgres do **Lote 3**: **461 verdes**, 8min57s — rodado de novo depois
+  dos testes da revisão, porque o gate anterior não os continha
+
+### Revisão adversarial depois de pronto
+
+Procurando o que quebra, não confirmando o que funciona — e achou três coisas.
+
+**1. A mutação revelou teste que passava pelo motivo errado.** Dois mutantes
+sobreviveram na primeira rodada, o pior sendo *"criação aceita motivo fora da
+lista"*. A razão: pela API o **Pydantic recusa o valor antes** de a entidade
+ser construída, então o teste e2e nunca exercitava a regra do domínio. Um
+afrouxamento ali passaria despercebido.
+
+A correção foram 6 testes **no nível do domínio**, onde a regra vive:
+`legado=True` aceita motivo fora da lista, mas continua recusando motivo
+vazio e alvo vazio — a tolerância é para a lista, não para tudo. Segunda
+rodada: **5 mutantes, 0 sobreviventes**.
+
+**2. Encerrar uma sessão legada não pode reescrever o motivo.** `save_estado`
+grava estado e horário, nunca o motivo — mas nada protegia isso. Um refactor
+que passasse a gravar o registro inteiro faria a sessão antiga aparecer como
+"manutenção": um valor plausível que **ninguém digitou**, e que a auditoria
+leria como declaração de quem abriu a sessão. Virou teste, e o mutante morre.
+
+**3. Verificação cruzada das âncoras do tour.** O teste unitário valida o
+*formato* da âncora (`[data-tour="…"]`), não se o elemento **existe** — e uma
+âncora órfã não dá erro, só perde o alvo em silêncio. Script que cruza
+declaração e JSX: **11 de 11**. Prova positiva: com uma âncora quebrada de
+propósito, ele acusa e sai com erro.
+
+Durante essa prova eu sabotei `passos.ts` e o backup caiu em `/tmp` em vez do
+scratchpad, deixando o arquivo quebrado por um momento. Restaurado e
+reconferido (18 testes verdes, `tsc` limpo) — mas vale a nota: **ao sabotar
+um arquivo de propósito, conferir que o backup existe onde se espera antes de
+rodar a prova.**
+
+**4. `backend/gravacoes/` estava fora do `.gitignore`.** 36 arquivos `.jsonl`
+com o conteúdo do que pessoas digitaram em terminais, prontos para entrar num
+commit. Versionar uma gravação a espalha por todo clone do repositório — fora
+do cofre, fora da auditoria e sem volta, porque o histórico guarda.
+
+Conferido que nunca chegaram a ser rastreadas (`git ls-files`), e que nenhum
+`.env`, `.pem`, `.pfx` ou `.key` está no índice. `gravacoes/` e
+`exportacoes/` entraram no `.gitignore`.
+
+O achado veio de ler o `git status` inteiro antes de dar por encerrado — e
+não da suíte, que não tem como saber o que deveria ou não ser versionado.
+
+---
+
 ## Em aberto
 
 - [ ] **Destino inviolável de verdade** para a exportação — o arquivo local
