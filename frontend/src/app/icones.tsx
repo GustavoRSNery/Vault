@@ -228,3 +228,15 @@ export function IconeSair(p: Props) {
     </Base>
   )
 }
+
+export function IconeConsumoApi(p: Props) {
+  // Setas entrando num bloco: chamadas que CHEGAM na API, que e o recorte
+  // da tela. Setas saindo diriam o contrario.
+  return (
+    <Base {...p}>
+      <rect x="13.5" y="4.5" width="6.5" height="15" rx="1.8" />
+      <path d="M4 8.5h6.5M4 15.5h6.5" />
+      <path d="M8 6l2.5 2.5L8 11M8 13l2.5 2.5L8 18" />
+    </Base>
+  )
+}

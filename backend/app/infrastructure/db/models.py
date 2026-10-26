@@ -47,6 +47,14 @@ class UserModel(Base):
     id: Mapped[str] = _id_column()
     email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Como a pessoa prefere ser chamada. Não substitui `full_name`: a trilha
+    # de auditoria e os relatórios usam o nome completo, porque "Gu" não
+    # identifica ninguém numa investigação meses depois.
+    apelido: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    # Foto como data URI, guardada no banco. Não em disco nem em bucket: são
+    # poucos KB por pessoa, e um arquivo servido de fora precisaria de rota
+    # pública — superfície nova num sistema cujo ponto é não ter nenhuma.
+    foto: Mapped[str] = mapped_column(Text, default="", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Segredo do TOTP: cifrado, nunca em claro — quem lê o banco não clona o MFA.
@@ -827,3 +835,45 @@ class EntregaWebhookModel(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = _now_column()
+
+
+class ChamadaApiModel(Base):
+    """Uma requisicao recebida pela API, para governanca de consumo.
+
+    Separada de `auditoria_eventos` de proposito: a trilha e prova,
+    encadeada e nunca apagada; isto e operacional, de volume alto e com
+    expurgo por idade. Ver `application/ports/apiusage.py`.
+
+    NAO existe coluna para o corpo da requisicao, e isso e deliberado: uma
+    chamada que cria segredo carrega a senha no corpo, e guarda-la aqui a
+    deixaria em claro fora do cofre. So o tamanho declarado e registrado.
+    """
+
+    __tablename__ = "api_chamadas"
+    __table_args__ = (
+        # A consulta padrao e "ultimos N do periodo", sempre ordenada no
+        # tempo: o indice composto evita varrer a tabela inteira depois que
+        # ela acumula meses de chamada.
+        Index("ix_api_chamadas_recebida", "recebida_em"),
+        Index("ix_api_chamadas_origem_tempo", "origem", "recebida_em"),
+        Index("ix_api_chamadas_aplicacao", "aplicacao_id", "recebida_em"),
+    )
+
+    id: Mapped[str] = _id_column()
+    recebida_em: Mapped[datetime] = _now_column()
+    metodo: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    caminho: Mapped[str] = mapped_column(String(400), nullable=False, index=True)
+    status: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    resultado: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    origem: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    # Sem ForeignKey de proposito: o registro de uso sobrevive a exclusao da
+    # aplicacao. Saber que "app-folha" consumia 4 mil chamadas por dia ate
+    # ser removida e justamente o que uma investigacao procura.
+    aplicacao_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    aplicacao_nome: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    usuario_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    usuario_email: Mapped[str] = mapped_column(String(254), default="", nullable=False)
+    ip: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    agente: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    duracao_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    bytes_recebidos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -9,6 +9,7 @@ import {
   IconeChave,
   IconeCofre,
   IconeConfiguracao,
+  IconeConsumoApi,
   IconeConvite,
   IconeCredencial,
   IconeDispositivo,
@@ -162,6 +163,16 @@ export const AREAS: Areas = [
         rotulo: 'Integrações',
         fim: false,
         Icone: IconeIntegracao,
+      },
+      {
+        // Fica em Administração e não em "Uso e histórico", onde o assunto
+        // encaixaria melhor: a tela exige ADMIN em auditoria, e um item
+        // visível que responde 403 ao ser clicado é pior que um item
+        // ausente — ensina que o menu mente.
+        para: '/consumo-api',
+        rotulo: 'Consumo da API',
+        fim: false,
+        Icone: IconeConsumoApi,
       },
       {
         para: '/admin/configuracao',

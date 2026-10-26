@@ -261,6 +261,36 @@ export const TOUR_AUDITORIA: Tour = {
   ],
 }
 
+export const TOUR_API: Tour = {
+  id: 'api-governanca',
+  titulo: 'Como ler o consumo da API',
+  passos: [
+    {
+      titulo: 'Quem chama o Vault de fora',
+      texto:
+        'Aqui aparecem as chamadas feitas por aplicações, robôs e scripts. As chamadas que a própria tela do Vault faz ficam de fora, senão elas seriam a maioria e esconderiam o resto.',
+    },
+    {
+      titulo: 'Recusada e com erro são coisas diferentes',
+      texto:
+        'Recusada é 401 ou 403: a credencial estava errada ou o acesso saiu do escopo permitido. Com erro é 5xx: o problema foi do nosso lado. Uma pede investigação, a outra pede correção.',
+      alvo: '[data-tour="metricas-api"]',
+    },
+    {
+      titulo: 'Comece por quem chama',
+      texto:
+        'A lista mostra quanto cada integração consumiu no período. Serve para notar quando alguma passa a chamar muito mais que de costume, ou quando aparece um consumidor que ninguém reconhece.',
+      alvo: '[data-tour="consumidores"]',
+    },
+    {
+      titulo: 'A coluna "pior" ao lado da média',
+      texto:
+        'Na aba de rotas, a média pode estar boa e ainda assim existir uma chamada de vários segundos. É ela que estoura o tempo limite do robô e derruba a integração de vez em quando.',
+      alvo: '[data-tour="rotas"]',
+    },
+  ],
+}
+
 export const TOUR_PERFIL: Tour = {
   id: 'perfil',
   titulo: 'Sua conta',
@@ -299,6 +329,7 @@ const TOURS: Record<string, Tour> = {
   [TOUR_SESSOES.id]: TOUR_SESSOES,
   [TOUR_GRAVACOES.id]: TOUR_GRAVACOES,
   [TOUR_AUDITORIA.id]: TOUR_AUDITORIA,
+  [TOUR_API.id]: TOUR_API,
   [TOUR_PERFIL.id]: TOUR_PERFIL,
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  TOUR_API,
   TOUR_AUDITORIA,
   TOUR_CERTIFICADOS,
   TOUR_CHAVES,
@@ -17,6 +18,7 @@ import {
 } from './passos'
 
 const TODOS = [
+  TOUR_API,
   TOUR_COFRES,
   TOUR_CREDENCIAIS,
   TOUR_CERTIFICADOS,
@@ -71,6 +73,7 @@ describe('catálogo de tours', () => {
 
   it('cobre Segredos, Uso e histórico, e o perfil', () => {
     expect(TODOS.map((t) => t.id).sort()).toEqual([
+      'api-governanca',
       'auditoria',
       'certificados',
       'chaves-api',

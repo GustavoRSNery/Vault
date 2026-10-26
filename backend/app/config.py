@@ -62,7 +62,24 @@ class Settings(BaseSettings):
     sessao_armazenamento: str = "local"
     sessao_gravacoes_path: str = "./gravacoes"
     sessao_proxy_host: str = ""
+    sessao_proxy_porta: int = 2222
+    # Chave de host do proxy SSH, em ARQUIVO. Gerada a cada boot, ela faria
+    # todo cliente ver o aviso de "host key changed" — o mesmo aviso de um
+    # ataque man-in-the-middle — e as pessoas aprenderiam a ignora-lo, que e
+    # o pior resultado possivel. O servidor recusa subir sem o arquivo.
+    sessao_proxy_chave_host: str = ""
     sessao_s3_bucket: str = ""
+    # Prefixo das gravacoes no bucket e endpoint alternativo (LocalStack ou
+    # S3 compativel). Vazio = o endpoint padrao da AWS.
+    sessao_s3_prefixo: str = "sessoes/"
+    sessao_s3_endpoint: str = ""
+    sessao_s3_region: str = ""
+
+    # Retencao do registro de uso da API, em dias. Diferente da trilha de
+    # auditoria, que nao expira: aquilo e prova, isto e operacional, e uma
+    # tabela de chamadas sem teto cresce ate as consultas da tela doerem.
+    # Zero desliga o expurgo.
+    api_uso_retencao_dias: int = 90
 
     @field_validator("master_key_b64")
     @classmethod

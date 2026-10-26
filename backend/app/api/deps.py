@@ -53,8 +53,13 @@ _engine = None
 _session_factory = None
 
 
-def _get_session_factory(settings: Settings):
-    """Engine e factory únicos por processo, criados na primeira requisição."""
+def get_session_factory(settings: Settings):
+    """Engine e factory únicos por processo, criados na primeira requisição.
+
+    Público porque o middleware de registro de uso precisa de uma sessão
+    **fora** do ciclo de `get_db`: ele roda depois de a resposta estar
+    pronta, quando a sessão da requisição já fechou.
+    """
     global _engine, _session_factory
     if _session_factory is None:
         connect_args = (
@@ -75,7 +80,7 @@ def get_db(
     isso os routers que precisam do evento fazem commit explícito antes de
     propagar. Ver `commit_audit_then_raise` em v1/secrets.py.
     """
-    factory = _get_session_factory(settings)
+    factory = get_session_factory(settings)
     db = factory()
     try:
         yield db
@@ -128,6 +133,17 @@ def get_login(
     totp: Annotated[TotpService, Depends(get_totp)],
 ) -> Login:
     return Login(db, Argon2PasswordHasher(), tokens, totp, AuditRepository(db))
+
+
+def get_hasher() -> Argon2PasswordHasher:
+    """O hash de senha, para quem precisa conferir a senha atual.
+
+    Sem estado e sem dependência, mas vem por `Depends` para que o teste
+    possa substituí-lo — verificar Argon2 de verdade custa ~50ms por
+    chamada, de propósito, e uma suíte que troca senha em dezenas de testes
+    sente isso.
+    """
+    return Argon2PasswordHasher()
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +226,9 @@ def get_captura(
     porta `CapturaDeSessao`, nunca a tecnologia.
     """
     if settings.sessao_captura == "proxy-ssh":
-        return ProxySsh(settings.sessao_proxy_host)
+        # A chave de host fica com o `ServidorDeSessoes`, que é quem fala SSH
+        # — ver `VAULT_SESSAO_PROXY_CHAVE_HOST` e docs/conectar-adaptadores.md.
+        return ProxySsh(settings.sessao_proxy_host, settings.sessao_proxy_porta)
     return CapturaManual()
 
 
@@ -223,7 +241,12 @@ def get_gravacoes(
     A interface usa a declaracao para nao anunciar prova onde ha so registro.
     """
     if settings.sessao_armazenamento == "s3":
-        return ArmazenamentoS3(settings.sessao_s3_bucket)
+        return ArmazenamentoS3(
+            settings.sessao_s3_bucket,
+            settings.sessao_s3_prefixo,
+            region=settings.sessao_s3_region or None,
+            endpoint_url=settings.sessao_s3_endpoint or None,
+        )
     return ArmazenamentoLocal(settings.sessao_gravacoes_path)
 
 

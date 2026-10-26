@@ -5,10 +5,13 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .api.deps import get_session_factory
 from .api.errors import domain_error_handler, unexpected_error_handler
+from .api.usage_middleware import RegistroDeUsoMiddleware
 from .api.v1 import (
     admin,
     apikeys,
+    apiusage,
     approvals,
     audit,
     auth,
@@ -19,6 +22,7 @@ from .api.v1 import (
     mfa,
     onboarding,
     panorama,
+    profile,
     search,
     sessions,
     settings as settings_router,
@@ -47,6 +51,15 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
 
+    # Registro de uso da API. Depois do CORS de propósito: a requisição
+    # barrada no CORS nunca chegou a ser atendida, e contá-la como consumo
+    # confundiria "tentou e foi recusada pela política" com "nem entrou".
+    app.add_middleware(
+        RegistroDeUsoMiddleware,
+        fabrica_de_sessao=lambda: get_session_factory(settings)(),
+        origens_da_tela=tuple(settings.cors_origins),
+    )
+
     # Erro de domínio vira resposta HTTP num lugar só; qualquer outra exceção
     # vira 500 genérico, sem traceback no corpo.
     app.add_exception_handler(DomainError, domain_error_handler)
@@ -68,6 +81,8 @@ def create_app() -> FastAPI:
     app.include_router(integrations.router, prefix="/api/v1")
     app.include_router(metrics.router, prefix="/api/v1")
     app.include_router(panorama.router, prefix="/api/v1")
+    app.include_router(profile.router, prefix="/api/v1")
+    app.include_router(apiusage.router, prefix="/api/v1")
 
     @app.get("/saude", tags=["Infraestrutura"], summary="Verificação de saúde")
     def saude() -> dict[str, str]:

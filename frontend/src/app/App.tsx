@@ -7,6 +7,7 @@ import { RecuperarPage } from '@/features/onboarding/RecuperarPage'
 import { ConvitesPage } from '@/features/admin/ConvitesPage'
 import { PerfilPage } from '@/features/auth/PerfilPage'
 import { AuditoriaPage } from '@/features/audit/AuditoriaPage'
+import { GovernancaApiPage } from '@/features/apiusage/GovernancaApiPage'
 import { ConfiguracaoPage } from '@/features/admin/ConfiguracaoPage'
 import { PoliticasPage } from '@/features/admin/PoliticasPage'
 import { SolicitacoesPage } from '@/features/approvals/SolicitacoesPage'
@@ -66,6 +67,7 @@ function Rotas() {
         <Route path="cofres" element={<CofresPage />} />
         <Route path="cofres/:nome" element={<CofreDetalhePage />} />
         <Route path="auditoria" element={<AuditoriaPage />} />
+        <Route path="consumo-api" element={<GovernancaApiPage />} />
         <Route path="dispositivos" element={<DispositivosPage />} />
         <Route path="credenciais" element={<CredenciaisPage />} />
         <Route path="certificados" element={<CertificadosPage />} />
