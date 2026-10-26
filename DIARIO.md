@@ -6,6 +6,188 @@ código já conta o quê.
 
 ---
 
+## 2026-10-26 — Proxy SSH, S3 imutável, KMS provado e perfil editável
+
+### Governança da API: quem consome o Vault de fora
+
+Aba nova em Administração. A trilha de auditoria responde *o que foi
+feito* ("segredo revelado"); esta responde **quem está batendo na API, em
+quais rotas, com que resultado** — e a segunda não se extrai da primeira:
+uma varredura que leva 401 em todas as tentativas não gera nenhum evento
+de negócio, e é justamente o que mais interessa ver.
+
+**O recorte, decidido pelo usuário:** registrar o consumo de fora
+(aplicações, robôs, scripts) e deixar de fora as chamadas da própria tela
+do Vault. Decide o `Sec-Fetch-Site`, não o `Origin`: aquele é preenchido
+pelo navegador e JavaScript não altera, enquanto `curl` escolhe o `Origin`
+que quiser. Script que forje `Origin` continua no relatório.
+
+**O corpo da requisição não é guardado em lugar nenhum**, também por
+decisão do usuário ("nem no back"). Vale em três camadas: a entidade não
+tem campo, a tabela não tem coluna, e o middleware nunca chama
+`request.body()`. Esta última é a que importa mais: ler o corpo no
+middleware o consome do stream e obriga a bufferizá-lo, fazendo o conteúdo
+de toda escrita — senha inclusive — existir numa variável do processo. O
+caminho é não ter o dado.
+
+**Dois bugs meus, os dois achados fora da suíte.**
+
+O primeiro: o teste que varria a senha em todas as colunas **passava
+varrendo tabela vazia**. O middleware usava a fábrica de sessão das
+settings reais em vez da injetada, então gravava num banco que o teste não
+lia. Descobri porque desconfiei de um teste que passou de primeira e rodei
+uma checagem imprimindo quantas linhas ele via: zero. A asserção
+`assert linhas` agora impede a reincidência.
+
+O segundo só apareceu **na tela, com o sistema no ar**: a navegação
+inteira entrava no relatório como externa. Em produção front e API são
+same-origin atrás do nginx, e o navegador **omite** `Origin` em GET
+same-origin — eu o exigia. O caso normal de produção era o que eu tratava
+como anomalia. Nenhum teste pegaria: todos mandavam `Origin`, porque eu os
+escrevi com a mesma suposição errada do código.
+
+Retenção de 90 dias por ferramenta com comando próprio
+(`app.tools.expurgar_uso_api`), não expurgo automático no boot: dado que
+some sozinho some sem explicação. Documentado em
+`docs/governanca-da-api.md`.
+
+### Tutoriais reescritos
+
+Os textos dos tours tinham, nas palavras do usuário, "muita cara de IA".
+Reli os 32 passos e o padrão era claro e repetido: título que é tese em
+vez de rótulo ("Selado é diferente de vazio"), travessão emendando uma
+sentença de efeito no fim (em 15 dos 32), frase de palestra ("o que
+transforma uma conta invadida em desastre"), e doutrina de segurança antes
+de dizer para que serve a tela.
+
+A regra nova, registrada no topo de `passos.ts`: o título diz **o que é**,
+em palavras que a pessoa usaria; o texto diz **o que ela faz ali**, e só
+então por quê, se o porquê mudar a decisão dela.
+
+### Menu superior: a navegação virou dois níveis
+
+Os cinco grupos que viviam empilhados na lateral subiram para uma barra no
+topo. A barra escolhe a **área**; a lateral navega **dentro** dela. Os vinte
+itens tomavam a coluna inteira e obrigavam a rolar para alcançar
+"Configurações"; agora a lateral mostra no máximo seis, todos visíveis.
+
+A inspiração veio de um sistema cujos ícones do topo são **módulos
+diferentes**. Copiar aquilo literalmente aqui criaria uma fileira de ícones
+sem destino — o Vault é um sistema só. O que foi copiado é a mecânica (topo
+escolhe o contexto, lateral navega nele), aplicada à divisão que já existia.
+
+**`areaDoCaminho` casa por prefixo e fica com o mais longo.** Ordem de
+declaração não serve: `/sessoes/gravacoes` casa com `/sessoes` e consigo
+mesmo, e varrer na ordem acertaria por sorte. O prefixo tem de terminar em
+`/`, senão `/cofres-antigos` abriria a área de `/cofres`.
+
+**O que a mutação ensinou.** Quatro mutantes; dois sobreviveram na primeira
+rodada. Um deles porque o teste que eu havia escrito **reimplementava a
+regra de casamento dentro do próprio teste** — teste que recalcula o que
+deveria verificar não verifica nada. O outro revelou algo melhor que um
+teste faltando: a raiz só não estraga o resultado porque está na *primeira*
+área, a mesma que o fallback devolve. Reordenar `AREAS` quebraria isso em
+silêncio, então o teste agora põe a raiz na segunda posição de propósito.
+
+**Verificado na tela**, não só na suíte: login real no container, as cinco
+áreas trocando, `/cofres/ciclo` mantendo "Segredos" marcada, e os
+breakpoints medidos em iframe de largura controlada — 961→960 esconde os
+rótulos, 721→720 empilha, e nada vaza horizontalmente até 360px. As contas
+de teste criadas para isso foram removidas depois.
+
+### Os dois esqueletos viraram adaptadores de verdade
+
+`ProxySsh` e `ArmazenamentoS3` levantavam `NotImplementedError`. Agora
+funcionam, e foram provados **contra os serviços reais** — LocalStack para
+S3 e KMS, container OpenSSH como alvo do proxy. O KMS já tinha adaptador e
+fiação; o que faltava era prova contra KMS de verdade, porque cliente falso
+devolve o que foi programado para devolver.
+
+**O proxy SSH grava de verdade.** A prova fim a fim: o cliente conecta no
+proxy com a senha *do proxy*, o proxy busca a credencial do alvo no cofre,
+conecta por fora e copia os dois sentidos. 10 eventos gravados, o comando
+digitado presente na gravação, a saída do alvo também — e a senha do alvo
+**nunca** passou por quem acessou, que é o ponto inteiro do cofre.
+
+**Um bug que só o teste real pegaria:** `asyncssh.connect("servidor:2222")`
+não reclama. Trata tudo como nome de host, tenta a porta 22 e falha com
+"não foi possível conectar" — mensagem que manda investigar rede e firewall
+quando a causa era a porta ter sido ignorada. Daí `separar_host_e_porta`,
+com IPv6 entre colchetes e 12 testes.
+
+**`imutavel` deixou de mentir.** O esqueleto devolvia `True` fixo, com o
+argumento de que "conectado, o destino é de fato imutável". O argumento tem
+um furo: bucket sem Object Lock aceita `PutObject` igual e nada falha — a
+aplicação anunciaria prova por anos, e a primeira auditoria descobriria que
+dava para apagar. Agora confere no bucket, e GOVERNANCE conta como **não**
+imutável, porque é contornável por quem tem a permissão de bypass.
+
+### Perfil editável (pedido do dono)
+
+Nome, apelido, foto, e-mail e senha. Duas colunas novas em `usuarios`
+(`apelido`, `foto`), aplicadas por `evoluir_schema`.
+
+**Trocar e-mail ou senha exige a senha atual.** Não é burocracia: um token
+roubado — de um XSS, de um laptop aberto, de um histórico de shell —
+permitiria trocar as duas coisas e **tomar a conta**, deixando a pessoa
+fora do próprio cofre. Com a senha, roubo de token vira acesso temporário
+em vez de perda definitiva.
+
+**A foto é validada em camadas, e SVG fica fora.** SVG carrega script: foto
+de perfil que executa JavaScript na tela de quem olha é XSS armazenado com
+o rosto de alguém em cima. Além do tipo, confere a **assinatura dos bytes**
+contra o tipo declarado — o cabeçalho do data URI é escrito por quem chama,
+e dizer `image/png` mandando outra coisa é trivial. O navegador reduz a
+imagem antes de subir, senão foto de celular (3–8 MB) seria recusada e a
+pessoa precisaria de um editor para usar o próprio sistema.
+
+**O apelido não substitui o nome completo.** Ele aparece nas telas; a
+trilha de auditoria e as sessões seguem com o nome completo, porque "Gu"
+não identifica ninguém numa investigação meses depois.
+
+### Um bug meu, que o teste pegou
+
+Eu gravava o evento da tentativa recusada e levantava a exceção em seguida.
+O rollback levava o evento junto: **tentativa de tomar a conta não deixava
+rastro.** O projeto já tinha resolvido isso em `admin.py`, com o comentário
+explicando exatamente o motivo — eu não tinha lido antes de escrever. Dois
+`db.commit()` antes do `raise` consertaram; a mutação confirma que
+revertê-los derruba dois testes.
+
+### Tutoriais de API em todas as telas
+
+Antes: 6 telas. Agora **17** — toda tela com endpoint de leitura. Os
+endpoints saíram do OpenAPI real (`create_app().openapi()`), não de
+memória. Mais tours nas quatro telas de Uso e histórico e no perfil.
+
+**Um invariante do próprio projeto me corrigiu:** o teste exige que o
+primeiro passo de todo tour **não** tenha âncora, para a tela ser explicada
+antes de qualquer destaque. Meu tour do perfil começava apontando para um
+cartão. A regra está certa — arrumei o tour, não o teste.
+
+`Card` passou a repassar `data-tour` ao `<section>`. Antes engolia o
+atributo em silêncio, e o passo virava balão centralizado sem nada indicar
+o motivo — o tipo de falha que passa por "o tour é assim mesmo".
+
+### Gates
+
+- **SQLite: 934 verdes** (eram 858) + 12 ignorados sem LocalStack
+- **Mutação: 24 mutantes, 24 mortos, zero sobreviventes**
+- **Front: 77 testes**, `tsc` limpo, lint `--max-warnings 0`, build real
+- **12 testes de integração** contra S3/KMS reais, que *skipam* sem
+  `VAULT_TEST_S3_ENDPOINT` — prova reproduzível, não script perdido
+- **Postgres: 934 verdes** em 9min33s. Obrigatório nesta rodada porque
+  houve `ADD COLUMN` (`usuarios.apelido`, `usuarios.foto`): a suíte roda em
+  SQLite por padrão, e a divergência de dialeto já causou incidente.
+
+### Dívida que encontrei (não criei)
+
+`main.py` e `deps.py` **já falhavam** ruff I001 antes desta rodada, por
+causa do `settings as settings_router`. Conferi contra `HEAD` em vez de
+supor. Não corrigi: embutiria mudança alheia no meio desta.
+
+---
+
 ## 2026-10-19 — Gravação de sessão (fase 3), em ports and adapters
 
 **Pedido explícito:** fazer agora, com o que depende de externo deixado em
@@ -1587,6 +1769,17 @@ não da suíte, que não tem como saber o que deveria ou não ser versionado.
       existe e processa a fila; falta quem a chame de tempos em tempos. Um
       cron externo resolve. Deliberadamente não há processo de fundo próprio:
       esconderia do operador quando as entregas acontecem.
-- [ ] **Captura automática por proxy SSH** — a porta está pronta e o
-      esqueleto escrito; falta o servidor intermediário. **BLOQUEADO** só
-      pela infraestrutura, não pelo código. Ver docs/conectar-adaptadores.md.
+- [x] **Captura automática por proxy SSH** — **feito e provado contra SSH
+      real** (26/10). `ProxySsh` guarda a fila de eventos e
+      `ServidorDeSessoes` (asyncssh) aceita a conexão, busca a credencial do
+      alvo no cofre e copia os dois sentidos. Para ligar: instalar o extra
+      `ssh`, gerar a chave de host em arquivo (`ssh-keygen -t ed25519`) e
+      `VAULT_SESSAO_CAPTURA=proxy-ssh`.
+- [x] **Armazenamento imutável de gravação** — `ArmazenamentoS3` escrito e
+      provado contra S3 com Object Lock (26/10). Falta só o bucket de
+      produção: COMPLIANCE, versionado, e credencial **sem** `DeleteObject`.
+- [x] **KMS como provedor de chave** — adaptador e fiação já existiam;
+      agora provado contra KMS real (26/10). Falta a credencial da AWS e
+      `VAULT_KMS_KEY_ID`. **Até lá a KEK está em memória:** quem lê o
+      processo decifra o cofre inteiro offline.
+- [x] **Gate do Postgres desta rodada** — 934 verdes em 9min33s (26/10).
