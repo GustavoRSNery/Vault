@@ -130,6 +130,17 @@ def get_login(
     return Login(db, Argon2PasswordHasher(), tokens, totp, AuditRepository(db))
 
 
+def get_hasher() -> Argon2PasswordHasher:
+    """O hash de senha, para quem precisa conferir a senha atual.
+
+    Sem estado e sem dependência, mas vem por `Depends` para que o teste
+    possa substituí-lo — verificar Argon2 de verdade custa ~50ms por
+    chamada, de propósito, e uma suíte que troca senha em dezenas de testes
+    sente isso.
+    """
+    return Argon2PasswordHasher()
+
+
 @dataclass(frozen=True, slots=True)
 class CurrentUser:
     """Quem está fazendo a requisição, mais o contexto para a auditoria."""

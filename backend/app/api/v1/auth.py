@@ -55,6 +55,10 @@ class MeResponse(BaseModel):
     id: str
     email: str
     full_name: str
+    # Apelido e foto viajam aqui para que o cabeçalho trate a pessoa como ela
+    # pediu, sem uma segunda chamada em cada tela.
+    apelido: str = ""
+    foto: str = ""
     mfa_enabled: bool
     # Quem decide e a politica, no servidor. O front usa isto apenas para
     # escolher o que desenhar no menu: cada rota de admin checa de novo, e
@@ -126,6 +130,8 @@ def me(
         id=user.id,
         email=user.email,
         full_name=user.full_name,
+        apelido=user.apelido or "",
+        foto=user.foto or "",
         mfa_enabled=user.mfa_enabled,
         is_admin=(
             evaluate(minhas, PolicyPath("admin"), Capability.ADMIN)

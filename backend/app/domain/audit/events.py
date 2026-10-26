@@ -57,6 +57,12 @@ class AuditAction(StrEnum):
     USER_DEACTIVATED = "usuario_desativado"
     USER_MFA_RESET = "usuario_mfa_reiniciado"
     USER_ROLES_CHANGED = "usuario_papeis_alterados"
+    # Edição do próprio perfil. Separados por tipo porque pesam diferente
+    # numa investigação: trocar a foto é cosmético, trocar o e-mail muda a
+    # identidade de login e a quem a trilha antiga se refere.
+    PROFILE_UPDATED = "perfil_alterado"
+    PROFILE_EMAIL_CHANGED = "perfil_email_alterado"
+    PROFILE_PASSWORD_CHANGED = "perfil_senha_alterada"
     DEVICE_CREATED = "dispositivo_cadastrado"
     CREDENTIAL_CREATED = "credencial_cadastrada"
     CREDENTIAL_CHECKED_OUT = "credencial_retirada"

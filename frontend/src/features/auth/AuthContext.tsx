@@ -14,6 +14,10 @@ export type Usuario = {
   id: string
   email: string
   full_name: string
+  /** Como a pessoa prefere ser chamada. Vazio = usar `full_name`. */
+  apelido: string
+  /** Foto como data URI. Vazia = mostrar as iniciais. */
+  foto: string
   mfa_enabled: boolean
   /** Decidido pela política no servidor. Serve só para montar o menu: cada
    *  rota de admin checa de novo, e esconder item nunca é controle de acesso. */
@@ -38,6 +42,14 @@ type AuthContextValue = {
   carregando: boolean
   entrar: (email: string, senha: string, codigo?: string) => Promise<ResultadoLogin>
   sair: () => void
+  /**
+   * Relê `/auth/me`.
+   *
+   * Chamado depois de editar o perfil: sem isto o cabeçalho continuaria
+   * mostrando o nome e a foto antigos até o próximo login, e a pessoa
+   * concluiria que a edição não salvou.
+   */
+  recarregarUsuario: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -99,9 +111,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [limparDados],
   )
 
+  const recarregarUsuario = useCallback(async () => {
+    // Sem try/catch de propósito: se `/auth/me` falhar aqui, quem chamou
+    // acabou de salvar algo e precisa saber que a tela está desatualizada.
+    setUsuario(await request<Usuario>('/auth/me'))
+  }, [])
+
   const valor = useMemo(
-    () => ({ usuario, carregando, entrar, sair }),
-    [usuario, carregando, entrar, sair],
+    () => ({ usuario, carregando, entrar, sair, recarregarUsuario }),
+    [usuario, carregando, entrar, sair, recarregarUsuario],
   )
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>
