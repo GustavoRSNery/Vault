@@ -108,8 +108,8 @@ class TestBusca:
         assert achados.status_code == 200
         assert [r["tipo"] for r in achados.json()["resultados"]] == ["segredo"]
 
-        rede = client.get("/api/v1/busca?termo=rede", headers=autenticado)
-        assert "certificado" in [r["tipo"] for r in rede.json()["resultados"]]
+        dominio = client.get("/api/v1/busca?termo=exemplo", headers=autenticado)
+        assert "certificado" in [r["tipo"] for r in dominio.json()["resultados"]]
 
         firewall = client.get("/api/v1/busca?termo=firewall", headers=autenticado)
         assert "dispositivo" in [r["tipo"] for r in firewall.json()["resultados"]]

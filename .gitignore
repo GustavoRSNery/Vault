@@ -1,0 +1,21 @@
+# Dependências
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Caches de ferramenta
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.vite/
+
+# Build
+dist/
+
+# Ambiente local
+.env
+
+# Gravações de sessão e exportações: gerados em execução
+gravacoes/
+exportacoes/
