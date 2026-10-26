@@ -210,7 +210,9 @@ def get_captura(
     porta `CapturaDeSessao`, nunca a tecnologia.
     """
     if settings.sessao_captura == "proxy-ssh":
-        return ProxySsh(settings.sessao_proxy_host)
+        # A chave de host fica com o `ServidorDeSessoes`, que é quem fala SSH
+        # — ver `VAULT_SESSAO_PROXY_CHAVE_HOST` e docs/conectar-adaptadores.md.
+        return ProxySsh(settings.sessao_proxy_host, settings.sessao_proxy_porta)
     return CapturaManual()
 
 
@@ -223,7 +225,12 @@ def get_gravacoes(
     A interface usa a declaracao para nao anunciar prova onde ha so registro.
     """
     if settings.sessao_armazenamento == "s3":
-        return ArmazenamentoS3(settings.sessao_s3_bucket)
+        return ArmazenamentoS3(
+            settings.sessao_s3_bucket,
+            settings.sessao_s3_prefixo,
+            region=settings.sessao_s3_region or None,
+            endpoint_url=settings.sessao_s3_endpoint or None,
+        )
     return ArmazenamentoLocal(settings.sessao_gravacoes_path)
 
 

@@ -280,7 +280,7 @@ class TestMotivoLegado:
         # ninguém digitou.
         assert sessao.motivo == "Conferencia do fechamento"
 
-    def test_legado_NAO_aceita_motivo_vazio(self) -> None:
+    def test_legado_nao_aceita_motivo_vazio(self) -> None:
         """A tolerância é só para a lista.
 
         Motivo em branco não é registro legado: é registro sem informação, e
@@ -289,7 +289,7 @@ class TestMotivoLegado:
         with pytest.raises(ValidationError, match="Informe o motivo"):
             _sessao(motivo="", legado=True)
 
-    def test_legado_NAO_aceita_alvo_vazio(self) -> None:
+    def test_legado_nao_aceita_alvo_vazio(self) -> None:
         """Nenhuma outra regra do domínio é afetada por `legado`."""
         with pytest.raises(ValidationError, match="alvo"):
             _sessao(alvo="", legado=True)
