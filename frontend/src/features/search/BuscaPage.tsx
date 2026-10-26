@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { request } from '@/shared/api/client'
 import { Badge, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 
 type Resultado = {
   tipo: 'cofre' | 'segredo' | 'dispositivo' | 'credencial' | 'certificado'
@@ -47,7 +48,25 @@ export function BuscaPage() {
   return (
     <>
       <header>
-        <h1 className="display">Busca</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Busca</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Busca"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/busca',
+                  descricao:
+                    'Busca em cofres, credenciais, certificados, chaves e dispositivos. Aceita ?termo=.',
+                  exemplo:
+                    '{"cofres":[],"credenciais":[{"name":"root-srv-01"}],"certificados":[]}',
+                },
+              ]}
+              observacao="A busca respeita permissão: o que você não pode ver não aparece no resultado."
+            />
+          </div>
+        </div>
         <p className="sub" style={{ margin: '4px 0 0' }}>
           Procura em cofres, segredos, dispositivos, credenciais e certificados
           — sempre dentro do que você pode ver. O <b>valor</b> de um segredo

@@ -78,9 +78,10 @@ export function TutorialApi({
       </div>
 
       <p className="help" style={{ margin: '8px 0 0' }}>
-        Autentique-se em <code>POST /api/v1/auth/login</code> e use o
-        <code> access_token</code> no cabeçalho. O token vale por pouco tempo —
-        é deliberado, e o <code>refresh_token</code> renova.
+        Primeiro faça login em <code>POST /api/v1/auth/login</code>. Ele
+        devolve um <code>access_token</code>, que vai no cabeçalho das outras
+        chamadas. Esse token dura pouco; quando expirar, use o{' '}
+        <code>refresh_token</code> para pegar um novo.
       </p>
 
       <div className="terminal" style={{ marginTop: 12 }}>
@@ -110,8 +111,8 @@ export function TutorialApi({
           </div>
           <div className="terminal-explica">
             Guarde o <code>access_token</code> numa variável:{' '}
-            <code>export VAULT_TOKEN=&quot;…&quot;</code>. Nunca cole o token
-            direto no comando — ele fica no histórico do shell.
+            <code>export VAULT_TOKEN=&quot;…&quot;</code>. Evite colar o token
+            direto no comando, porque ele fica salvo no histórico do terminal.
           </div>
         </div>
 
@@ -147,11 +148,10 @@ export function TutorialApi({
       </div>
 
       <Alerta tom="warning">
-        <b>A API de leitura não cria nem altera nada.</b> Cadastro, edição e
-        exclusão passam pela tela, onde cada ação tem confirmação e vai para a
-        trilha. E nenhuma destas rotas devolve o <b>valor</b> de um segredo:
-        revelar é outra rota, com permissão própria, e cada revelação vira
-        evento.
+        <b>Estas rotas só leem dados.</b> Cadastrar, editar e excluir continua
+        sendo pela tela, onde cada ação pede confirmação e fica registrada.
+        Nenhuma delas devolve a <b>senha</b> guardada: para isso existe uma
+        rota separada, que exige permissão específica e registra quem revelou.
         {observacao && <> {observacao}</>}
       </Alerta>
     </div>

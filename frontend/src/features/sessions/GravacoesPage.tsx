@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { request } from '@/shared/api/client'
 import { Badge, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
 import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 import { formatarDuracao, TabelaSessoes, type Sessao } from './SessoesPage'
@@ -23,6 +24,7 @@ import { perfilDeAtividade } from './perfil'
 export function GravacoesPage() {
   const [termo, setTermo] = useState('')
   const [vista, setVista] = useState<'grade' | 'tabela'>('grade')
+  const tour = useTour('gravacoes')
 
   const { data: gravacoes, isFetching } = useQuery({
     queryKey: ['gravacoes', termo.trim()],
@@ -36,6 +38,8 @@ export function GravacoesPage() {
 
   return (
     <>
+      <Tour id="gravacoes" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
         <div className="row between wrap" style={{ gap: 12 }}>
           <div>
@@ -46,6 +50,8 @@ export function GravacoesPage() {
               sensível que a maioria dos segredos.
             </p>
           </div>
+          <div className="row wrap" style={{ gap: 8 }}>
+          <BotaoTour aoAbrir={tour.abrir} />
           <TutorialApi
             titulo="Gravações"
             endpoints={[
@@ -64,8 +70,9 @@ export function GravacoesPage() {
                   'Uma gravação com a linha do tempo completa, para reproduzir fora daqui. Abrir a gravação de outra pessoa vira evento de auditoria.',
               },
             ]}
-            observacao="Ver gravação alheia é registrado: quem revisa também é revisado."
+            observacao="Abrir a gravação de outra pessoa fica registrado, com o seu nome e o horário."
           />
+          </div>
         </div>
       </header>
 
@@ -152,9 +159,9 @@ function CartaoGravacao({ sessao }: { sessao: Sessao }) {
   const barras = perfilDeAtividade(sessao.id, sessao.eventos, sessao.duracao_ms)
 
   return (
-    <Link to={`/sessoes/${sessao.id}`} className="cartao-gravacao">
+    <Link to={`/sessoes/${sessao.id}`} className="cartao-gravacao" data-tour="linha-gravacao">
       <div className="gravacao-capa">
-        <div className="gravacao-barras" aria-hidden="true">
+        <div className="gravacao-barras" aria-hidden="true" data-tour="barra-atividade">
           {barras.map((altura, i) => (
             <span
               key={`${sessao.id}-${i}`}

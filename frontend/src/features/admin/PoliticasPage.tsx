@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 
 type Regra = {
   path: string
@@ -56,7 +57,31 @@ export function PoliticasPage() {
   return (
     <>
       <header>
-        <h1 className="display">Políticas de acesso</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Políticas de acesso</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Políticas"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/admin/politicas',
+                  descricao:
+                    'As políticas, com quantas regras cada uma tem.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/admin/politicas/{nome}',
+                  descricao:
+                    'As regras de uma política: caminho, capacidades e efeito.',
+                  exemplo:
+                    '{"name":"leitura-cofres","rules":[{"path":"cofres/*","capabilities":["read"],"effect":"allow"}]}',
+                },
+              ]}
+              observacao="Negar vence permitir: uma regra deny no caminho derruba qualquer allow que exista."
+            />
+          </div>
+        </div>
         <p className="sub" style={{ margin: '4px 0 0' }}>
           {politicas?.length ?? 0} polític{(politicas?.length ?? 0) === 1 ? 'a' : 'as'}.
           Uma regra <b>deny</b> derruba qualquer <b>allow</b>, por mais específico

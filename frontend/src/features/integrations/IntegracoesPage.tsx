@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 /**
@@ -104,7 +105,30 @@ export function IntegracoesPage() {
               descartar duplicata.
             </p>
           </div>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Integrações"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/integracoes',
+                  descricao: 'Os destinos de webhook, com estado e última entrega.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/integracoes/eventos',
+                  descricao:
+                    'Os eventos que o Vault publica, para assinar o que interessa.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/integracoes/{nome}/entregas',
+                  descricao:
+                    'A fila de entregas de um destino, com tentativas e próxima.',
+                },
+              ]}
+              observacao="A assinatura do corpo segue o padrão Standard Webhooks: confira antes de confiar no conteúdo."
+            />
             <Botao
               pequeno
               variante="secondary"

@@ -142,8 +142,9 @@ export function ChavesApiPage() {
             <h1 className="display">Chaves de API</h1>
             <p className="sub" style={{ margin: '4px 0 0' }}>
               {lista.length} chave{lista.length === 1 ? '' : 's'} sob governo.
-              O valor fica cifrado no cofre — aqui ficam o dono, o escopo e o
-              vencimento, que é o que some quando a chave mora numa planilha.
+              A chave em si fica cifrada no cofre. Aqui ficam o dono, o escopo e
+              o vencimento, que é o que costuma se perder quando a chave mora
+              numa planilha.
             </p>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>

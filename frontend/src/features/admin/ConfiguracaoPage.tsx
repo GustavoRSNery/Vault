@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { useConfiguracao, type Configuracao } from '@/shared/config/useConfiguracao'
 import { Alerta, Botao, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 type Campo = {
@@ -170,7 +171,23 @@ export function ConfiguracaoPage() {
   return (
     <>
       <header>
-        <h1 className="display">Configurações</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Configurações</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Configuração"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/configuracao',
+                  descricao:
+                    'A configuração efetiva do sistema.',
+                },
+              ]}
+              observacao="Valor de segredo nunca aparece aqui: a rota devolve o que está configurado, não as chaves."
+            />
+          </div>
+        </div>
         <p className="sub" style={{ margin: '4px 0 0' }}>
           Ajustes operacionais desta instalação. Chave-mestra, banco e limites
           de segurança <b>não</b> estão aqui — configuração que permite

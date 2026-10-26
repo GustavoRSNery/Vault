@@ -12,6 +12,8 @@ import {
   Carregando,
   Vazio,
 } from '@/shared/ui/components'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 /** Uma máquina alcançável por SSH, vinda de Dispositivos. */
@@ -88,6 +90,7 @@ export function formatarDuracao(ms: number): string {
 export function SessoesPage() {
   const queryClient = useQueryClient()
   const [abrindo, setAbrindo] = useState(false)
+  const tour = useTour('sessoes')
   const [erro, setErro] = useState<string | null>(null)
   const [derrubando, setDerrubando] = useState<string | null>(null)
 
@@ -127,6 +130,8 @@ export function SessoesPage() {
 
   return (
     <>
+      <Tour id="sessoes" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
         <div className="row between wrap">
           <div>
@@ -137,9 +142,32 @@ export function SessoesPage() {
               e se encerra o que está em andamento.
             </p>
           </div>
-          <Botao variante="secondary" pequeno onClick={() => setAbrindo(true)}>
-            Registrar outro acesso
-          </Botao>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Sessões"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/sessoes',
+                  descricao: 'As sessões abertas agora, com quem acessa e desde quando.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/sessoes/maquinas',
+                  descricao: 'As máquinas alcançáveis por SSH, vindas do inventário.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/sessoes/motivos',
+                  descricao: 'Os motivos aceitos ao abrir uma sessão. Lista fechada.',
+                },
+              ]}
+            />
+            <Botao variante="secondary" pequeno onClick={() => setAbrindo(true)}>
+              Registrar outro acesso
+            </Botao>
+          </div>
         </div>
       </header>
 
@@ -148,7 +176,7 @@ export function SessoesPage() {
       {/* Três contagens diferentes, de propósito: duas sessões da mesma
           pessoa na mesma máquina são 2 sessões, 1 pessoa e 1 máquina — e é
           essa diferença que diz se o acesso está concentrado ou espalhado. */}
-      <div className="cards-3">
+      <div className="cards-3" data-tour="metricas-sessoes">
         <CardMetrica rotulo="Sessões agora" valor={lista.length} tom="brand" />
         <CardMetrica rotulo="Pessoas conectadas" valor={pessoas} tom="success" />
         <CardMetrica rotulo="Máquinas em uso" valor={maquinas} tom="warning" />
@@ -198,7 +226,7 @@ export function SessoesPage() {
         )}
       </Card>
 
-      <Card titulo={`Sessões de outras pessoas (${alheias.length})`}>
+      <Card titulo={`Sessões de outras pessoas (${alheias.length})`} data-tour="sessoes-outras">
         {alheias.length === 0 ? (
           <Vazio
             titulo="Ninguém mais está conectado agora"

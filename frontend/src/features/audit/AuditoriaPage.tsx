@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 
 type Evento = {
   id: string
@@ -72,6 +74,7 @@ export function AuditoriaPage() {
   const queryClient = useQueryClient()
   const [exportacao, setExportacao] = useState<Exportacao | null>(null)
   const [erro, setErro] = useState<string | null>(null)
+  const tour = useTour('auditoria')
 
   const { data: trilha, isLoading } = useQuery({
     queryKey: ['auditoria'],
@@ -102,8 +105,35 @@ export function AuditoriaPage() {
 
   return (
     <>
+      <Tour id="auditoria" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
-        <h1 className="display">Auditoria</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Auditoria</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Auditoria"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/auditoria',
+                  descricao:
+                    'Os eventos da trilha que você pode ver. Quem não administra vê os próprios.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/auditoria/integridade',
+                  descricao:
+                    'Confere a cadeia e diz se algum evento foi alterado ou removido, e quantos estão ancorados fora.',
+                  exemplo:
+                    '{"integra":true,"eventos_verificados":1284,"eventos_ancorados":1200,"ancoras_conferidas":3}',
+                },
+              ]}
+              observacao="O encadeamento mostra que nenhum registro foi alterado. A cópia externa é o que impede o próprio sistema de refazer a sequência inteira."
+            />
+          </div>
+        </div>
         <p className="sub">
           {trilha?.escopo === 'tudo'
             ? 'Todos os eventos registrados no sistema.'
@@ -114,11 +144,13 @@ export function AuditoriaPage() {
 
       {integridade && (
         <Card
+          data-tour="integridade"
           titulo="Integridade da trilha"
           acao={
             <Botao
               variante="secondary"
               pequeno
+              data-tour="exportar-trilha"
               onClick={() => exportar.mutate()}
               disabled={exportar.isPending}
             >

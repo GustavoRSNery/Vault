@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 import { useAuth } from '@/features/auth/AuthContext'
 
@@ -68,7 +69,29 @@ export function UsuariosPage() {
   return (
     <>
       <header>
-        <h1 className="display">Pessoas</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Pessoas</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Pessoas"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/admin/usuarios',
+                  descricao:
+                    'As contas, com papéis e se estão ativas.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/admin/papeis',
+                  descricao:
+                    'Os papéis existentes e as políticas de cada um.',
+                },
+              ]}
+              observacao="Rotas de administração: cada uma confere a permissão de novo no servidor."
+            />
+          </div>
+        </div>
         <p className="sub" style={{ margin: '4px 0 0' }}>
           {usuarios?.length ?? 0} conta{(usuarios?.length ?? 0) === 1 ? '' : 's'}.
           Desativar uma conta derruba o acesso na chamada seguinte, mesmo com

@@ -5,6 +5,7 @@ import { ApiError, request } from '@/shared/api/client'
 import { CampoSegredo } from '@/features/secrets/CampoSegredo'
 import { SeloQuorum } from './SeloQuorum'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 import { Voltar } from '@/shared/ui/Voltar'
 
@@ -151,8 +152,35 @@ export function CofreDetalhePage() {
               Todo valor nasce mascarado e cada revelação é registrada em auditoria.
             </p>
           </div>
-          <div className="row" style={{ gap: 10 }}>
+          <div className="row wrap" style={{ gap: 10 }}>
             {selado && <Badge tom="danger">Selado</Badge>}
+            <TutorialApi
+              titulo="Segredos do cofre"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/cofres/{cofre}/segredos',
+                  descricao:
+                    'Os segredos do cofre. O valor NÃO vem aqui: só o cadastro.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/cofres/{cofre}/segredos/{nome}/versoes',
+                  descricao: 'O histórico de versões de um segredo.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/cofres/{cofre}/lixeira',
+                  descricao: 'Segredos apagados que ainda podem ser restaurados.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/cofres/{cofre}/selo',
+                  descricao: 'O selo do cofre e o quórum necessário para reabrir.',
+                },
+              ]}
+              observacao="Revelar valor é POST e vira evento na trilha, com quem revelou. Listar não revela nada."
+            />
             <Botao
               variante="secondary"
               pequeno

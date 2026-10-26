@@ -47,14 +47,6 @@ class UserModel(Base):
     id: Mapped[str] = _id_column()
     email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    # Como a pessoa prefere ser chamada. Não substitui `full_name`: a trilha
-    # de auditoria e os relatórios usam o nome completo, porque "Gu" não
-    # identifica ninguém numa investigação meses depois.
-    apelido: Mapped[str] = mapped_column(String(60), default="", nullable=False)
-    # Foto como data URI, guardada no banco. Não em disco nem em bucket: são
-    # poucos KB por pessoa, e um arquivo servido de fora precisaria de rota
-    # pública — superfície nova num sistema cujo ponto é não ter nenhuma.
-    foto: Mapped[str] = mapped_column(Text, default="", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Segredo do TOTP: cifrado, nunca em claro — quem lê o banco não clona o MFA.

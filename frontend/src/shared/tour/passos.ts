@@ -1,15 +1,21 @@
 /**
- * Tours das telas de Segredos.
+ * Tours das telas: Segredos, Uso e histórico, e o perfil.
  *
- * **O que um tour resolve e o que não resolve.** Ele responde "o que é esta
- * tela e por onde começo" — a pergunta de quem chega pela primeira vez. Não
- * substitui rótulo claro nem texto de ajuda: um tour que precisa explicar o
- * que um campo faz está consertando um campo mal nomeado, e o conserto some
- * assim que a pessoa fecha o tour.
+ * Um tour responde "o que é esta tela e por onde começo", para quem chega
+ * pela primeira vez. Não substitui rótulo claro: um tour que precisa
+ * explicar o que um campo faz está consertando um campo mal nomeado, e o
+ * conserto some assim que a pessoa fecha o tour.
  *
- * Por isso cada passo aqui fala de **conceito e sequência**, não de mecânica
- * de botão. "O cofre guarda o valor; o inventário guarda o governo" é algo
- * que nenhum rótulo cabe em três palavras.
+ * **Como escrever um passo.** O título diz o que é, em palavras que a
+ * pessoa usaria. O texto diz o que ela faz ali, e só então por quê, se o
+ * porquê mudar a decisão dela.
+ *
+ * O que evitar, porque a primeira versão destes textos tinha tudo isto:
+ * título que é tese em vez de rótulo ("Selado é diferente de vazio");
+ * travessão emendando uma sentença de efeito no fim; frase de palestra
+ * ("é o que transforma uma conta invadida em desastre"); e doutrina de
+ * segurança antes de dizer para que serve a tela. Quem abre o tour quer
+ * saber o que fazer, não ser convencido.
  */
 
 export type Passo = {
@@ -36,20 +42,20 @@ export const TOUR_COFRES: Tour = {
   titulo: 'Como os cofres funcionam',
   passos: [
     {
-      titulo: 'O cofre guarda o valor',
+      titulo: 'O que é um cofre',
       texto:
-        'Senha, chave e certificado vivem aqui dentro, cifrados. As outras telas de Segredos guardam o governo — de qual equipamento é, quem responde, quando vence — e apontam para cá.',
+        'É onde ficam guardadas as senhas, chaves e certificados, cifrados. As outras telas de Segredos guardam só os dados de controle (de qual máquina é, quem responde, quando vence) e apontam para cá.',
     },
     {
-      titulo: 'A linha inteira abre o cofre',
+      titulo: 'Clique na linha para abrir',
       texto:
-        'Clique em qualquer ponto da linha para ver os segredos lá dentro. Cada revelação de valor vira evento na trilha, com quem revelou e quando.',
+        'Qualquer ponto da linha abre o cofre e mostra o que tem dentro. Toda vez que alguém revela um valor, fica registrado quem revelou e quando.',
       alvo: '[data-tour="linha-cofre"]',
     },
     {
-      titulo: 'Selado é diferente de vazio',
+      titulo: 'Cofre selado continua cheio',
       texto:
-        'Um cofre selado existe e tem conteúdo, mas ninguém lê até ser reaberto. É a reação a um incidente: interrompe o acesso sem apagar nada.',
+        'Selar bloqueia a leitura sem apagar nada: o conteúdo continua lá e volta quando o cofre for reaberto. Serve para cortar o acesso rápido, quando há suspeita de problema.',
       alvo: '[data-tour="estado-cofre"]',
     },
   ],
@@ -60,26 +66,26 @@ export const TOUR_CREDENCIAIS: Tour = {
   titulo: 'Como as credenciais funcionam',
   passos: [
     {
-      titulo: 'Aqui fica o governo, não a senha',
+      titulo: 'Esta tela não guarda a senha',
       texto:
-        'Esta tela registra de qual equipamento a credencial é, quem usa e de quanto em quanto tempo troca. O valor fica no cofre, cifrado.',
+        'Aqui ficam os dados de controle: de qual máquina a credencial é, quem usa e de quanto em quanto tempo precisa ser trocada. A senha em si fica no cofre, cifrada.',
     },
     {
-      titulo: 'Retirar é exclusivo',
+      titulo: 'Retirar reserva para você',
       texto:
-        'Quem retira fica com a credencial até devolver — ninguém mais a leva no meio. É o que evita duas pessoas trocando a mesma senha em paralelo e derrubando o acesso uma da outra.',
+        'Enquanto você está com a credencial, ninguém mais consegue retirá-la. Isso evita duas pessoas trocarem a mesma senha ao mesmo tempo e uma derrubar o acesso da outra.',
       alvo: '[data-tour="retirar"]',
     },
     {
-      titulo: 'Nunca rotacionada conta como atrasada',
+      titulo: 'Nunca trocada aparece como atrasada',
       texto:
-        'É o pior caso, não o caso neutro: deixá-la fora do relatório esconderia justamente a senha de fábrica que ninguém trocou.',
+        'Uma credencial que nunca foi rotacionada entra na lista de atrasadas. É normalmente a senha que veio de fábrica e ninguém mexeu, então é a que mais precisa aparecer.',
       alvo: '[data-tour="rotacao"]',
     },
     {
-      titulo: 'Importar traz o governo, nunca o valor',
+      titulo: 'A importação descarta as senhas',
       texto:
-        'Arquivos de gerenciador trazem senha; a importação descarta e avisa quantas descartou. O valor entra pelo cofre, que cifra e audita.',
+        'Arquivos exportados de gerenciadores costumam vir com as senhas dentro. A importação traz só os dados de controle, descarta o resto e avisa quantas descartou. As senhas você cadastra pelo cofre.',
       alvo: '[data-tour="importar"]',
     },
   ],
@@ -90,26 +96,26 @@ export const TOUR_CERTIFICADOS: Tour = {
   titulo: 'Como os certificados funcionam',
   passos: [
     {
-      titulo: 'O que vence derruba conexão',
+      titulo: 'Ordenados por quem vence antes',
       texto:
-        'Certificado vencido não degrada: corta o TLS de uma vez. Por isso a tela ordena pelo que vence primeiro, e não por nome.',
+        'A lista começa pelo certificado mais próximo de vencer, e não por nome. Quando um certificado vence, o site ou serviço para de funcionar na hora, sem aviso.',
     },
     {
-      titulo: 'As faixas são acumuladas',
+      titulo: 'As faixas somam umas às outras',
       texto:
-        '"Em até 30 dias" inclui o que vence em 7. Lidas como fatias separadas, parecem não fechar a conta — e alguém conclui que falta certificado em algum lugar.',
+        'O que vence em 7 dias também está contado em "até 30 dias". Se você somar as faixas esperando chegar ao total, vai dar número errado.',
       alvo: '[data-tour="faixas"]',
     },
     {
-      titulo: 'O arquivo preenche os campos',
+      titulo: 'Envie o arquivo em vez de digitar',
       texto:
-        'Envie o .pem, .crt ou .cer e titular, emissor, serial e validade são lidos dele. Digitar à mão é onde o serial entra com um dígito a menos — e é por ele que a autoridade emissora identifica o certificado.',
+        'Com o .pem, .crt ou .cer, o sistema lê titular, emissor, serial e validade sozinho. Digitar à mão costuma dar erro no serial, que é um número longo e é por ele que a emissora identifica o certificado.',
       alvo: '[data-tour="novo-certificado"]',
     },
     {
-      titulo: 'A tela mostra o cadastro; o terminal mostra o arquivo',
+      titulo: 'Confira o que está instalado',
       texto:
-        'Os comandos openssl leem o arquivo instalado de verdade, na máquina onde ele está. Quando os dois divergem — e divergem, porque alguém renovou sem avisar — é o arquivo que vale.',
+        'Esta tela mostra o que foi cadastrado aqui. Os comandos openssl leem o arquivo que está rodando na máquina. Se os dois não baterem, vale o que está na máquina: alguém renovou e não avisou.',
       alvo: '[data-tour="ver-certificado"]',
     },
   ],
@@ -120,20 +126,20 @@ export const TOUR_CHAVES: Tour = {
   titulo: 'Como as chaves de API funcionam',
   passos: [
     {
-      titulo: 'Chave de API não é senha comum',
+      titulo: 'Anote onde cada chave é usada',
       texto:
-        'Ela tem serviço, ambiente, escopo e lugar de uso. Sem isso, ninguém sabe o que quebra ao revogá-la — e é por isso que chaves vazadas ficam ativas por anos.',
+        'Além da chave, cadastre o serviço, o ambiente e em que sistema ela é usada. É essa informação que permite revogar uma chave sabendo o que vai parar de funcionar.',
     },
     {
-      titulo: '"Sem uso declarado" é candidata a revogação',
+      titulo: 'Chaves sem uso declarado',
       texto:
-        'São chaves ativas que ninguém disse onde usa. Revogue e espere: se nada quebrar, não precisavam existir.',
+        'São chaves ativas que ninguém registrou onde usa. Uma forma de resolver: revogue e espere. Se nada parar de funcionar, a chave não era necessária.',
       alvo: '[data-tour="sem-uso"]',
     },
     {
-      titulo: 'O exemplo sai pronto para colar',
+      titulo: 'Exemplo pronto para copiar',
       texto:
-        'Com endereço e rota preenchidos, a tela monta a requisição e o curl. O valor sai sempre como <valor> — exemplo com chave de verdade vira chave em print de tela e em anexo de chamado.',
+        'Preenchendo o endereço e a rota, a tela monta a requisição e o comando curl. No lugar da chave aparece sempre <valor>, para o exemplo poder ser colado em chamado ou print sem vazar nada.',
       alvo: '[data-tour="ver-exemplo"]',
     },
   ],
@@ -144,15 +150,141 @@ export const TOUR_DISPOSITIVOS: Tour = {
   titulo: 'Como os dispositivos funcionam',
   passos: [
     {
-      titulo: 'O equipamento é a âncora',
+      titulo: 'Procure pela máquina',
       texto:
-        'Credenciais e acessos pendem de um dispositivo. É assim que se procura: ninguém pergunta "onde está a senha-root?", pergunta "qual a senha do srv-db-01?".',
+        'Cada credencial e cada acesso pertencem a um equipamento. Na prática é assim que se procura: ninguém lembra do nome da senha, lembra que precisa entrar no srv-db-01.',
     },
     {
-      titulo: 'Acesso cadastrado vira conexão pronta',
+      titulo: 'Cadastre o acesso uma vez só',
       texto:
-        'Host, porta e usuário informados aqui alimentam a conexão nas outras telas. Cadastrar uma vez evita que cada pessoa monte o comando à sua maneira — e erre a porta.',
+        'O endereço, a porta e o usuário informados aqui são reaproveitados pelas outras telas na hora de conectar. Assim ninguém precisa montar o comando de cabeça e errar a porta.',
       alvo: '[data-tour="acessos"]',
+    },
+  ],
+}
+
+// ------------------------------------------------- tours de Uso e histórico
+
+export const TOUR_SOLICITACOES: Tour = {
+  id: 'solicitacoes',
+  titulo: 'Como o acesso é pedido e concedido',
+  passos: [
+    {
+      titulo: 'O acesso tem prazo',
+      texto:
+        'Em vez de deixar todo mundo com acesso permanente a tudo, aqui você pede o acesso quando precisa dele, por um tempo determinado. Vencido o prazo, ele cai sozinho, sem ninguém precisar lembrar de remover.',
+    },
+    {
+      titulo: 'Fila de aprovação',
+      texto:
+        'Se você pode aprovar, vê aqui os pedidos de todo mundo, com o motivo e o prazo de cada um. Dá para aprovar vários de uma vez quando chegam muitos pedidos iguais.',
+      alvo: '[data-tour="fila-aprovacao"]',
+    },
+    {
+      titulo: 'Seus pedidos',
+      texto:
+        'O que você pediu, se já foi respondido e até quando o acesso vale. Os pedidos recusados também ficam na lista, com a decisão registrada.',
+      alvo: '[data-tour="meus-pedidos"]',
+    },
+  ],
+}
+
+export const TOUR_SESSOES: Tour = {
+  id: 'sessoes',
+  titulo: 'Como as sessões funcionam',
+  passos: [
+    {
+      titulo: 'O que é uma sessão',
+      texto:
+        'Toda vez que alguém entra numa máquina pelo Vault, fica registrado quem entrou, onde, por que motivo e por quanto tempo. É o que responde depois quem estava no servidor em determinado horário.',
+    },
+    {
+      titulo: 'Os três números são diferentes',
+      texto:
+        'Sessões abertas, pessoas conectadas e máquinas em uso raramente são iguais: uma pessoa pode abrir duas sessões, e duas pessoas podem estar na mesma máquina.',
+      alvo: '[data-tour="metricas-sessoes"]',
+    },
+    {
+      titulo: 'Encerrar a sessão de outra pessoa',
+      texto:
+        'Você pode cortar o acesso de alguém na hora, e fica registrado que foi você quem cortou. O que já tinha sido feito continua gravado: encerrar não apaga a gravação.',
+      alvo: '[data-tour="sessoes-outras"]',
+    },
+  ],
+}
+
+export const TOUR_GRAVACOES: Tour = {
+  id: 'gravacoes',
+  titulo: 'Como as gravações funcionam',
+  passos: [
+    {
+      titulo: 'O que fica gravado',
+      texto:
+        'Tudo o que foi digitado na sessão e tudo o que a máquina respondeu, com o horário de cada coisa. Dá para assistir depois, seja para revisar uma mudança, ensinar alguém ou entender o que causou um problema.',
+    },
+    {
+      titulo: 'A barra mostra os momentos de uso',
+      texto:
+        'Uma sessão de 40 minutos pode ter tido 2 minutos de trabalho ou 40. A barra mostra em quais trechos houve digitação, para você pular direto para o que interessa.',
+      alvo: '[data-tour="barra-atividade"]',
+    },
+    {
+      titulo: 'Não dá para editar nem apagar',
+      texto:
+        'O sistema não oferece como alterar uma gravação, de propósito: se desse para reescrever, ela não serviria de comprovação. Quando o armazenamento configurado não garante isso, a tela avisa.',
+      alvo: '[data-tour="linha-gravacao"]',
+    },
+  ],
+}
+
+export const TOUR_AUDITORIA: Tour = {
+  id: 'auditoria',
+  titulo: 'Como a trilha funciona',
+  passos: [
+    {
+      titulo: 'Os registros são encadeados',
+      texto:
+        'Cada evento guarda uma marca do evento anterior, como elos de uma corrente. Se alguém apagar ou alterar um registro do meio, os elos deixam de encaixar e esta tela mostra onde quebrou.',
+    },
+    {
+      titulo: 'O que "íntegra" quer dizer aqui',
+      texto:
+        'Quer dizer que os elos encaixam: nada foi alterado. Mas quem tivesse controle total do sistema poderia refazer a corrente inteira. Por isso existe a cópia externa, explicada no passo seguinte.',
+      alvo: '[data-tour="integridade"]',
+    },
+    {
+      titulo: 'Exportar guarda uma cópia fora',
+      texto:
+        'Exportar envia os eventos novos para um destino que o Vault não consegue alterar depois. Assim a comparação deixa de depender só do próprio sistema. Se o destino configurado não for desse tipo, a tela avisa.',
+      alvo: '[data-tour="exportar-trilha"]',
+    },
+  ],
+}
+
+export const TOUR_PERFIL: Tour = {
+  id: 'perfil',
+  titulo: 'Sua conta',
+  passos: [
+    {
+      titulo: 'Seus dados',
+      texto:
+        'Aqui você altera os seus próprios dados e cuida da segurança da sua conta. Nada do que você mudar nesta tela afeta outras pessoas. Permissões e papéis ficam na tela de Administração.',
+    },
+    {
+      titulo: 'Apelido e nome completo',
+      texto:
+        'O apelido é como você aparece nas telas do dia a dia. O nome completo é o que fica nos registros de auditoria e nas sessões, onde alguém pode precisar identificar você meses depois.',
+      alvo: '[data-tour="editar-perfil"]',
+    },
+    {
+      titulo: 'Para trocar e-mail ou senha, confirme a senha atual',
+      texto:
+        'É uma proteção para o caso de alguém pegar seu computador desbloqueado ou roubar seu acesso: sem saber a sua senha, a pessoa não consegue trocar o e-mail nem a senha e deixar você de fora da conta.',
+    },
+    {
+      titulo: 'Verificação em duas etapas',
+      texto:
+        'Com ela ativada, saber a sua senha não basta para entrar: é pedido também um código que só aparece no seu celular. Vale a pena ativar.',
     },
   ],
 }
@@ -163,6 +295,11 @@ const TOURS: Record<string, Tour> = {
   [TOUR_CERTIFICADOS.id]: TOUR_CERTIFICADOS,
   [TOUR_CHAVES.id]: TOUR_CHAVES,
   [TOUR_DISPOSITIVOS.id]: TOUR_DISPOSITIVOS,
+  [TOUR_SOLICITACOES.id]: TOUR_SOLICITACOES,
+  [TOUR_SESSOES.id]: TOUR_SESSOES,
+  [TOUR_GRAVACOES.id]: TOUR_GRAVACOES,
+  [TOUR_AUDITORIA.id]: TOUR_AUDITORIA,
+  [TOUR_PERFIL.id]: TOUR_PERFIL,
 }
 
 export function tourDe(id: string): Tour | undefined {

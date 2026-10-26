@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 type ConvitePendente = {
@@ -107,9 +108,28 @@ export function ConvitesPage() {
               preferir. Não depende de servidor de e-mail.
             </p>
           </div>
-          <Botao pequeno onClick={() => setCriando(true)}>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Convites"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/convites',
+                  descricao:
+                    'Os convites pendentes, com quem convidou e quando vence.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/recuperar/pedidos',
+                  descricao:
+                    'Pedidos de redefinição de senha aguardando decisão.',
+                },
+              ]}
+            />
+            <Botao pequeno onClick={() => setCriando(true)}>
             Convidar pessoa
-          </Botao>
+            </Botao>
+          </div>
         </div>
       </header>
 

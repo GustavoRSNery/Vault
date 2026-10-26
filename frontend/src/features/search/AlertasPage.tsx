@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { request } from '@/shared/api/client'
 import { Badge, Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 type Severidade = 'alta' | 'media' | 'baixa'
@@ -71,7 +72,22 @@ export function AlertasPage() {
   return (
     <>
       <header>
-        <h1 className="display">Alertas</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Alertas</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Alertas"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/alertas',
+                  descricao:
+                    'O que precisa de atenção: vencimentos, credenciais paradas, selos e pendências.',
+                },
+              ]}
+            />
+          </div>
+        </div>
         <p className="sub" style={{ margin: '4px 0 0' }}>
           Derivados do estado atual, não de uma tabela de alertas — alerta
           gravado precisa ser apagado quando a causa some, e esquecer disso

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 type Aplicacao = {
@@ -175,9 +176,47 @@ export function AplicacoesPage() {
               temporário que expira sozinho.
             </p>
           </div>
-          <Botao pequeno onClick={() => setCriando(true)}>
-            Nova aplicação
-          </Botao>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Aplicações"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/aplicacoes',
+                  descricao:
+                    'As aplicações cadastradas para acesso de máquina.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/aplicacoes/{nome}/credenciais',
+                  descricao:
+                    'As credenciais que a aplicação pode ler.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/aplicacoes/{nome}/leases',
+                  descricao:
+                    'Os leases ativos: o acesso que a aplicação tem agora.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/aplicacoes/{nome}/consumo',
+                  descricao:
+                    'O que a aplicação de fato leu, e quando.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/aplicacoes-vencimentos',
+                  descricao:
+                    'Credenciais vencendo e as que ninguém lê há tempo.',
+                },
+              ]}
+              observacao="Se uma credencial está parada há muito tempo, vale checar: ou a aplicação deixou de usá-la, ou ela tem um acesso que não precisa ter."
+            />
+            <Botao pequeno onClick={() => setCriando(true)}>
+              Nova aplicação
+            </Botao>
+          </div>
         </div>
       </header>
 

@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, request } from '@/shared/api/client'
 import { Alerta, Badge, Botao, Campo, Card, Carregando, Vazio } from '@/shared/ui/components'
+import { BotaoTour, Tour, useTour } from '@/shared/tour/Tour'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { formatarDataHora } from '@/shared/lib/formato'
 
 type ResultadoDoLote = {
@@ -48,6 +50,7 @@ const JANELAS = [
 export function SolicitacoesPage() {
   const queryClient = useQueryClient()
   const [pedindo, setPedindo] = useState(false)
+  const tour = useTour('solicitacoes')
   const [erro, setErro] = useState<string | null>(null)
 
   const invalidar = () => {
@@ -116,19 +119,40 @@ export function SolicitacoesPage() {
 
   return (
     <>
+      <Tour id="solicitacoes" aberto={tour.aberto} aoFechar={tour.fechar} />
+
       <header>
         <div className="row between wrap">
           <div>
             <h1 className="display">Solicitações de acesso</h1>
             <p className="sub" style={{ margin: '4px 0 0' }}>
-              Acesso que você não deveria ter <b>para sempre</b>. A concessão
-              nasce com prazo e caduca sozinha — ninguém precisa lembrar de
+              Peça acesso por um prazo, em vez de mantê-lo para sempre. A
+              concessão caduca sozinha, sem ninguém precisar lembrar de
               remover.
             </p>
           </div>
-          <Botao pequeno onClick={() => setPedindo(true)}>
-            Pedir acesso
-          </Botao>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <BotaoTour aoAbrir={tour.abrir} />
+            <TutorialApi
+              titulo="Solicitações"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/solicitacoes',
+                  descricao: 'Suas solicitações, com situação e prazo.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/solicitacoes/fila',
+                  descricao:
+                    'A fila de aprovação — só o que cabe a você decidir. Pedido seu não aparece.',
+                },
+              ]}
+            />
+            <Botao pequeno onClick={() => setPedindo(true)}>
+              Pedir acesso
+            </Botao>
+          </div>
         </div>
       </header>
 
@@ -153,7 +177,7 @@ export function SolicitacoesPage() {
       )}
 
       {fila && fila.length > 0 && (
-        <Card titulo={`Fila de aprovação (${fila.length})`}>
+        <Card titulo={`Fila de aprovação (${fila.length})`} data-tour="fila-aprovacao">
           <p className="sub" style={{ marginTop: 0 }}>
             Só o que cabe a você decidir. Pedidos seus não aparecem aqui: quem
             pede não aprova, nem tendo permissão.
@@ -223,7 +247,7 @@ export function SolicitacoesPage() {
         </Card>
       )}
 
-      <Card titulo="Minhas solicitações">
+      <Card titulo="Minhas solicitações" data-tour="meus-pedidos">
         {!minhas || minhas.length === 0 ? (
           <Vazio
             titulo="Você ainda não pediu acesso"

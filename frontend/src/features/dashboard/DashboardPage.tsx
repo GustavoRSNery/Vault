@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '@/features/auth/AuthContext'
 import { request } from '@/shared/api/client'
 import { Card, CardMetrica, Carregando, Vazio } from '@/shared/ui/components'
+import { TutorialApi } from '@/shared/tour/TutorialApi'
 import { BarrasHorizontais, ColunasCompactas } from '@/shared/charts'
 import {
   AbaCertificados,
@@ -119,7 +120,28 @@ export function DashboardPage() {
   return (
     <>
       <header>
-        <h1 className="display">Olá, {primeiroNome}</h1>
+        <div className="row between wrap" style={{ gap: 12 }}>
+          <h1 className="display">Olá, {primeiroNome}</h1>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <TutorialApi
+              titulo="Painel"
+              endpoints={[
+                {
+                  metodo: 'GET',
+                  caminho: '/panorama',
+                  descricao:
+                    'Os números por domínio: cofres, credenciais, certificados e chaves.',
+                },
+                {
+                  metodo: 'GET',
+                  caminho: '/metricas/serie',
+                  descricao:
+                    'A série temporal e os rankings que alimentam os gráficos.',
+                },
+              ]}
+            />
+          </div>
+        </div>
         <p className="sub">
           {aba === 'resumo'
             ? 'O estado geral dos seus cofres e o que precisa de atenção.'

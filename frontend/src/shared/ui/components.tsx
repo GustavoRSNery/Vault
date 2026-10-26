@@ -70,13 +70,23 @@ export function Card({
   titulo,
   acao,
   children,
+  'data-tour': dataTour,
 }: {
   titulo?: string
   acao?: ReactNode
   children: ReactNode
+  /**
+   * Âncora do tour, repassada ao `<section>`.
+   *
+   * Declarada de forma explícita em vez de espalhar `...props`: o tour acha o
+   * cartão por este seletor, e um atributo que o componente engolisse em
+   * silêncio faria o passo virar balão centralizado sem nada indicando o
+   * motivo — o tipo de falha que passa por "o tour é assim mesmo".
+   */
+  'data-tour'?: string
 }) {
   return (
-    <section className="card">
+    <section className="card" data-tour={dataTour}>
       {(titulo || acao) && (
         <div className="row between" style={{ marginBottom: 16 }}>
           {titulo && <h2 className="title">{titulo}</h2>}

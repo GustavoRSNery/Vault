@@ -80,8 +80,8 @@ export function CertificadosPage() {
             <h1 className="display">Certificados</h1>
             <p className="sub" style={{ margin: '4px 0 0' }}>
               {lista.length} certificado{lista.length === 1 ? '' : 's'}, ordenados
-              pelo que vence primeiro. Só metadados e validade — a chave privada,
-              quando guardada, vive cifrada no cofre.
+              pelo que vence primeiro. Aqui ficam só os dados do certificado; a
+              chave privada, quando guardada, fica cifrada no cofre.
             </p>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>

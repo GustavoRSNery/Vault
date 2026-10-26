@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
+  TOUR_AUDITORIA,
   TOUR_CERTIFICADOS,
   TOUR_CHAVES,
   TOUR_COFRES,
   TOUR_CREDENCIAIS,
   TOUR_DISPOSITIVOS,
+  TOUR_GRAVACOES,
+  TOUR_PERFIL,
+  TOUR_SESSOES,
+  TOUR_SOLICITACOES,
   ehUltimo,
   passoAnterior,
   proximoPasso,
@@ -17,6 +22,11 @@ const TODOS = [
   TOUR_CERTIFICADOS,
   TOUR_CHAVES,
   TOUR_DISPOSITIVOS,
+  TOUR_SOLICITACOES,
+  TOUR_SESSOES,
+  TOUR_GRAVACOES,
+  TOUR_AUDITORIA,
+  TOUR_PERFIL,
 ]
 
 describe('navegação entre passos', () => {
@@ -59,14 +69,27 @@ describe('catálogo de tours', () => {
     expect(tourDe('inexistente')).toBeUndefined()
   })
 
-  it('cobre as cinco telas de Segredos', () => {
+  it('cobre Segredos, Uso e histórico, e o perfil', () => {
     expect(TODOS.map((t) => t.id).sort()).toEqual([
+      'auditoria',
       'certificados',
       'chaves-api',
       'cofres',
       'credenciais',
       'dispositivos',
+      'gravacoes',
+      'perfil',
+      'sessoes',
+      'solicitacoes',
     ])
+  })
+
+  it('o catálogo não tem tour fora desta lista', () => {
+    // Pega o esquecimento inverso: registrar o tour em TOURS e esquecer de
+    // exportá-lo faria o `tourDe` achar algo que nenhum teste conhece.
+    for (const id of TODOS.map((t) => t.id)) {
+      expect(tourDe(id)).toBeDefined()
+    }
   })
 })
 

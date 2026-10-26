@@ -9,10 +9,20 @@ import {
   type Tour as TipoTour,
 } from './passos'
 
-type Retangulo = { topo: number; esquerda: number; largura: number; altura: number }
+export type Retangulo = {
+  topo: number
+  esquerda: number
+  largura: number
+  altura: number
+}
 
-/** Onde o balão cabe em relação ao elemento destacado. */
-function posicionar(alvo: Retangulo | null): {
+/**
+ * Onde o balão cabe em relação ao elemento destacado.
+ *
+ * Exportada para teste: é aritmética de bordas, e o erro dela aparece
+ * como balão cortado na tela de alguém, não como exceção.
+ */
+export function posicionar(alvo: Retangulo | null): {
   estilo: React.CSSProperties
   seta: 'cima' | 'baixo' | null
 } {
@@ -25,24 +35,60 @@ function posicionar(alvo: Retangulo | null): {
 
   const LARGURA = 340
   const ESPACO = 14
-  const espacoAbaixo = window.innerHeight - (alvo.topo + alvo.altura)
+  // Folga da borda da janela. O balão nunca encosta nela: encostado, parece
+  // cortado mesmo quando está inteiro.
+  const MARGEM = 12
+  const espacoAbaixo = window.innerHeight - (alvo.topo + alvo.altura) - ESPACO
+  const espacoAcima = alvo.topo - ESPACO
+
   // Abaixo por padrão; acima só quando não cabe. Um balão que cobre o
   // próprio elemento que está explicando não explica nada.
-  const abaixo = espacoAbaixo > 220
+  //
+  // Quando NENHUM dos dois lados tem os 220px, fica com o maior em vez de
+  // insistir em cima: ancorado por `bottom` logo acima de um alvo que está
+  // no topo da tela, o balão crescia para fora da janela e era cortado,
+  // escondendo o título e às vezes o texto inteiro.
+  const abaixo = espacoAbaixo > 220 || espacoAbaixo >= espacoAcima
 
   const esquerda = Math.min(
-    Math.max(alvo.esquerda + alvo.largura / 2 - LARGURA / 2, 12),
-    window.innerWidth - LARGURA - 12,
+    Math.max(alvo.esquerda + alvo.largura / 2 - LARGURA / 2, MARGEM),
+    window.innerWidth - LARGURA - MARGEM,
+  )
+
+  // Altura do balão: o que o lado escolhido comporta, nunca mais que a
+  // janela inteira menos as margens. O piso de 140px dá espaço a título e
+  // botões, mas não pode valer acima da própria janela — numa tela baixa
+  // ele empurrava o balão para fora, refazendo o defeito que o teto
+  // corrige.
+  const altura = Math.min(
+    window.innerHeight - MARGEM * 2,
+    Math.max(140, (abaixo ? espacoAbaixo : espacoAcima) - MARGEM),
+  )
+
+  // Posição vertical resolvida como número e grampeada dentro da janela,
+  // em vez de ancorada por `top`/`bottom` e torcer para caber.
+  //
+  // Ancorar e limitar a altura não basta, e a varredura do teste mostrou
+  // por quê: com o alvo no topo de uma janela baixa, o balão começa dentro
+  // da tela e **termina** fora. São duas bordas, e só grampear as duas
+  // garante que ele fique inteiro visível em qualquer tamanho de janela.
+  const desejado = abaixo
+    ? alvo.topo + alvo.altura + ESPACO
+    : alvo.topo - ESPACO - altura
+  const topo = Math.min(
+    Math.max(desejado, MARGEM),
+    Math.max(MARGEM, window.innerHeight - altura - MARGEM),
   )
 
   return {
     estilo: {
       width: LARGURA,
       left: esquerda,
-      top: abaixo ? alvo.topo + alvo.altura + ESPACO : undefined,
-      bottom: abaixo
-        ? undefined
-        : window.innerHeight - alvo.topo + ESPACO,
+      top: topo,
+      maxHeight: altura,
+      // Rola por dentro quando o texto não couber: o que transborda a
+      // janela é inalcançável, não dá nem para rolar a página até.
+      overflowY: 'auto',
     },
     seta: abaixo ? 'cima' : 'baixo',
   }

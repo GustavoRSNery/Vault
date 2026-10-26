@@ -143,7 +143,7 @@ export function CredenciaisPage() {
           {credenciais?.length ?? 0} credencia{(credenciais?.length ?? 0) === 1 ? 'l' : 'is'}
           {atrasadas > 0 && <> · <b>{atrasadas}</b> com rotação atrasada</>}
           {emCustodia > 0 && <> · {emCustodia} em custódia</>}. Retirar uma
-          credencial é exclusivo: ninguém mais a leva até a devolução.
+          credencial reserva ela para você até a devolução.
         </p>
       </header>
 
